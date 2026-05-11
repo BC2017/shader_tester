@@ -4,10 +4,11 @@ import type { ShaderPass } from "../lib/shaderTypes";
 
 interface EditorPaneProps {
   pass: ShaderPass;
+  showMinimap: boolean;
   onChange: (code: string) => void;
 }
 
-export function EditorPane({ pass, onChange }: EditorPaneProps) {
+export function EditorPane({ pass, showMinimap, onChange }: EditorPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
@@ -66,7 +67,7 @@ export function EditorPane({ pass, onChange }: EditorPaneProps) {
           options={{
             fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
             fontSize: 13,
-            minimap: { enabled: true },
+            minimap: { enabled: showMinimap },
             scrollBeyondLastLine: false,
             automaticLayout: false,
             tabSize: 4,
