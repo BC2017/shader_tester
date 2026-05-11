@@ -4,20 +4,24 @@ import { KeyRound, MonitorPlay, Settings, X } from "lucide-react";
 interface SetupPanelProps {
   initialApiKey: string;
   showEditorMinimap: boolean;
+  showChannelEditor: boolean;
   isPreviewPaused: boolean;
   onClose: () => void;
   onSave: (apiKey: string) => Promise<void>;
   onShowEditorMinimapChange: (enabled: boolean) => void;
+  onShowChannelEditorChange: (enabled: boolean) => void;
   onPreviewPausedChange: (paused: boolean) => void;
 }
 
 export function SetupPanel({
   initialApiKey,
   showEditorMinimap,
+  showChannelEditor,
   isPreviewPaused,
   onClose,
   onSave,
   onShowEditorMinimapChange,
+  onShowChannelEditorChange,
   onPreviewPausedChange
 }: SetupPanelProps) {
   const [apiKey, setApiKey] = useState(initialApiKey);
@@ -83,6 +87,14 @@ export function SetupPanel({
               onChange={(event) => onShowEditorMinimapChange(event.target.checked)}
             />
             <span>Show editor minimap</span>
+          </label>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={showChannelEditor}
+              onChange={(event) => onShowChannelEditorChange(event.target.checked)}
+            />
+            <span>Show channel editor</span>
           </label>
           <label className="settings-toggle">
             <input

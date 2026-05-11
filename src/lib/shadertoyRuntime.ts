@@ -64,6 +64,7 @@ export class ShadertoyRuntime {
   private startTime = performance.now();
   private lastFrameTime = this.startTime;
   private frame = 0;
+  private fps = 0;
   private shaderError = "";
   private mouse = [0, 0, 0, 0];
   private statusHandler?: (status: RuntimeStatus) => void;
@@ -289,6 +290,11 @@ export class ShadertoyRuntime {
   }
 
   private fragmentSource(commonCode: string, passCode: string) {
+    const common = this.normalizeShaderCode(commonCode);
+    const pass = this.normalizeShaderCode(passCode);
+    const hasMainImage = /\bvoid\s+mainImage\s*\(/.test(pass);
+    const hasMain = /\bvoid\s+main\s*\(/.test(pass);
+
     return `#version 300 es
 precision highp float;
 precision highp sampler2D;
@@ -296,6 +302,7 @@ precision highp sampler2D;
 uniform vec3 iResolution;
 uniform float iTime;
 uniform float iTimeDelta;
+uniform float iFrameRate;
 uniform int iFrame;
 uniform vec4 iMouse;
 uniform vec4 iDate;
@@ -307,17 +314,42 @@ uniform sampler2D iChannel1;
 uniform sampler2D iChannel2;
 uniform sampler2D iChannel3;
 
+#define HW_PERFORMANCE 0
+#define iGlobalTime iTime
+#define texture2D texture
+#define texture2DProj textureProj
+#define texture2DLod textureLod
+#define texture2DLodEXT textureLod
+#define texture2DGrad textureGrad
+#define texture2DGradEXT textureGrad
+#define textureCube texture
+#define textureCubeLod textureLod
+#define textureCubeLodEXT textureLod
+#define gl_FragColor outColor
+
 out vec4 outColor;
 
-${commonCode}
+${common}
 
-${passCode}
+${pass}
 
+${hasMainImage ? `
 void main() {
   vec4 color = vec4(0.0);
   mainImage(color, gl_FragCoord.xy);
   outColor = color;
-}`;
+}` : hasMain ? "" : `
+void main() {
+  outColor = vec4(0.0, 0.0, 0.0, 1.0);
+}`}
+`;
+  }
+
+  private normalizeShaderCode(code: string) {
+    return code
+      .split(/\r?\n/)
+      .filter((line) => !/^#extension\s+(GL_OES_standard_derivatives|GL_EXT_shader_texture_lod)\s*:/.test(line.trim()))
+      .join("\n");
   }
 
   private collectUniforms(program: WebGLProgram) {
@@ -325,6 +357,7 @@ void main() {
       "iResolution",
       "iTime",
       "iTimeDelta",
+      "iFrameRate",
       "iFrame",
       "iMouse",
       "iDate",
@@ -630,6 +663,7 @@ void main() {
     const time = (now - this.startTime) / 1000;
     const delta = Math.max(0.001, (now - this.lastFrameTime) / 1000);
     this.lastFrameTime = now;
+    this.fps = 1 / delta;
 
     const ordered = this.project.passes.filter((pass) => pass.type === "buffer" || pass.type === "image");
     for (const pass of ordered) {
@@ -669,6 +703,7 @@ void main() {
     gl.uniform3f(uniforms.iResolution, width, height, 1);
     gl.uniform1f(uniforms.iTime, time);
     gl.uniform1f(uniforms.iTimeDelta, delta);
+    gl.uniform1f(uniforms.iFrameRate, this.fps);
     gl.uniform1i(uniforms.iFrame, this.frame);
     gl.uniform4f(uniforms.iMouse, this.mouse[0], this.mouse[1], this.mouse[2], this.mouse[3]);
     gl.uniform4fv(uniforms.iDate, this.dateUniform());

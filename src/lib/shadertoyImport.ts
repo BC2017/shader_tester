@@ -2,7 +2,9 @@ import type { ShaderChannel, ShaderPass, ShaderProject } from "./shaderTypes";
 
 interface ShadertoyInput {
   channel?: number;
+  id?: number | string;
   src?: string;
+  filepath?: string;
   ctype?: string;
   sampler?: {
     filter?: string;
@@ -11,11 +13,17 @@ interface ShadertoyInput {
   };
 }
 
+interface ShadertoyOutput {
+  id?: number | string;
+  channel?: number;
+}
+
 interface ShadertoyRenderPass {
   name?: string;
   type?: string;
   code?: string;
   inputs?: ShadertoyInput[];
+  outputs?: ShadertoyOutput[];
 }
 
 interface ShadertoyPayload {
@@ -42,7 +50,8 @@ const bufferIds: Record<string, string> = {
 
 export function shadertoyJsonToProject(json: unknown, sourceUrl?: string): ShaderProject {
   const shader = json as ShadertoyPayload;
-  const passes = (shader.renderpass ?? []).map(convertPass).sort(passSort);
+  const outputPasses = outputPassMap(shader.renderpass ?? []);
+  const passes = (shader.renderpass ?? []).map((pass) => convertPass(pass, outputPasses)).sort(passSort);
   const safePasses = passes.length > 0 ? passes : [fallbackImagePass()];
 
   return {
@@ -57,7 +66,7 @@ export function shadertoyJsonToProject(json: unknown, sourceUrl?: string): Shade
   };
 }
 
-function convertPass(pass: ShadertoyRenderPass): ShaderPass {
+function convertPass(pass: ShadertoyRenderPass, outputPasses: Map<string, string>): ShaderPass {
   const name = pass.name || titleCase(pass.type || "Image");
   const type = pass.type === "common" ? "common" : pass.type === "sound" ? "sound" : pass.type === "image" ? "image" : "buffer";
   const id = passId(name, type);
@@ -67,15 +76,15 @@ function convertPass(pass: ShadertoyRenderPass): ShaderPass {
     name,
     type,
     code: pass.code ?? "void mainImage(out vec4 fragColor, in vec2 fragCoord) {\n    fragColor = vec4(0.0);\n}",
-    channels: (pass.inputs ?? []).map(convertInput)
+    channels: (pass.inputs ?? []).map((input) => convertInput(input, outputPasses))
   };
 }
 
-function convertInput(input: ShadertoyInput): ShaderChannel {
+function convertInput(input: ShadertoyInput, outputPasses: Map<string, string>): ShaderChannel {
   const source = input.ctype === "keyboard"
     ? { kind: "keyboard" as const }
-    : input.ctype === "buffer" || input.src?.toLowerCase().includes("buffer")
-      ? { kind: "buffer" as const, passId: bufferIds[(input.src ?? "").toLowerCase()] ?? "buffer-a" }
+    : isBufferInput(input)
+      ? { kind: "buffer" as const, passId: bufferPassId(input, outputPasses) }
       : input.src
         ? { kind: "texture" as const, assetId: input.src, mediaType: mediaTypeForInput(input) }
         : { kind: "none" as const };
@@ -89,6 +98,60 @@ function convertInput(input: ShadertoyInput): ShaderChannel {
   };
 }
 
+function outputPassMap(renderPasses: ShadertoyRenderPass[]) {
+  const map = new Map<string, string>();
+
+  for (const pass of renderPasses) {
+    const name = pass.name || titleCase(pass.type || "Image");
+    const type = pass.type === "common" ? "common" : pass.type === "sound" ? "sound" : pass.type === "image" ? "image" : "buffer";
+    const id = passId(name, type);
+    for (const output of pass.outputs ?? []) {
+      if (output.id === undefined || output.id === null) continue;
+      map.set(String(output.id), id);
+    }
+  }
+
+  return map;
+}
+
+function isBufferInput(input: ShadertoyInput) {
+  return input.ctype === "buffer" || [input.src, input.filepath].some((value) => bufferReference(value));
+}
+
+function bufferPassId(input: ShadertoyInput, outputPasses: Map<string, string>) {
+  if (input.id !== undefined && input.id !== null) {
+    const passIdForOutput = outputPasses.get(String(input.id));
+    if (passIdForOutput) return passIdForOutput;
+  }
+
+  return bufferReference(input.src) ?? bufferReference(input.filepath) ?? "buffer-a";
+}
+
+function bufferReference(value?: string) {
+  if (!value) return undefined;
+  const normalized = normalizeReference(value);
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+
+  if (bufferIds[normalized]) return bufferIds[normalized];
+  if (bufferIds[compact]) return bufferIds[compact];
+
+  const letter = compact.match(/(?:buffer|buf)([abcd])/);
+  if (letter) return bufferIds[`buffer ${letter[1]}`];
+
+  const number = compact.match(/(?:buffer|buf)0?([0-3])/);
+  if (number) return bufferIds[`buffer${number[1]}`];
+
+  return undefined;
+}
+
+function normalizeReference(value: string) {
+  try {
+    return decodeURIComponent(value).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  } catch {
+    return value.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+}
+
 function mediaTypeForInput(input: ShadertoyInput): "image" | "video" | "audio" {
   if (input.ctype === "video") return "video";
   if (input.ctype === "music" || input.ctype === "musicstream") return "audio";
@@ -96,6 +159,9 @@ function mediaTypeForInput(input: ShadertoyInput): "image" | "video" | "audio" {
 }
 
 function passId(name: string, type: string) {
+  const bufferId = type === "buffer" ? bufferReference(name) : undefined;
+  if (bufferId) return bufferId;
+
   const key = name.toLowerCase();
   if (bufferIds[key]) return bufferIds[key];
   if (type === "common") return "common";
@@ -106,7 +172,9 @@ function passId(name: string, type: string) {
 
 function passSort(left: ShaderPass, right: ShaderPass) {
   const order = ["common", "buffer-a", "buffer-b", "buffer-c", "buffer-d", "image", "sound"];
-  return order.indexOf(left.id) - order.indexOf(right.id);
+  const leftIndex = order.indexOf(left.id);
+  const rightIndex = order.indexOf(right.id);
+  return (leftIndex === -1 ? order.length : leftIndex) - (rightIndex === -1 ? order.length : rightIndex);
 }
 
 function titleCase(value: string) {

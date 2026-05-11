@@ -42,6 +42,7 @@ function App() {
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
   const [isPreviewPaused, setIsPreviewPaused] = useState(false);
   const [showEditorMinimap, setShowEditorMinimap] = useState(true);
+  const [showChannelEditor, setShowChannelEditor] = useState(true);
 
   useEffect(() => {
     Promise.all([loadSettings(), loadLastProject()])
@@ -341,7 +342,7 @@ function App() {
             pass={activePass}
             showMinimap={showEditorMinimap}
             onChange={(code) => updatePassCode(activePass, code)}
-            controls={(
+            controls={showChannelEditor ? (
               <ChannelPanel
                 pass={activePass}
                 bufferPasses={bufferPasses}
@@ -350,7 +351,7 @@ function App() {
                 onChannelChange={(channel) => updatePassChannel(activePass, channel)}
                 onRemovePass={handleRemoveActivePass}
               />
-            )}
+            ) : null}
           />
           <PreviewPane project={project} isPaused={isPreviewPaused} saveStatus={saveStatus} />
         </div>
@@ -360,10 +361,12 @@ function App() {
         <SetupPanel
           initialApiKey={apiKey}
           showEditorMinimap={showEditorMinimap}
+          showChannelEditor={showChannelEditor}
           isPreviewPaused={isPreviewPaused}
           onClose={() => setShowSetup(false)}
           onSave={handleSaveApiKey}
           onShowEditorMinimapChange={setShowEditorMinimap}
+          onShowChannelEditorChange={setShowChannelEditor}
           onPreviewPausedChange={setIsPreviewPaused}
         />
       )}
