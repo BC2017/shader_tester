@@ -1,3 +1,4 @@
+use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -271,6 +272,34 @@ fn save_project(app: AppHandle, project: serde_json::Value) -> Result<StoredProj
 }
 
 #[tauri::command]
+fn load_cached_asset_data_url(
+    app: AppHandle,
+    source_path: String,
+) -> Result<Option<String>, AppError> {
+    let conn = db(&app)?;
+    let asset = conn
+        .query_row(
+            "select local_path, content_type from cached_assets where source_path = ?1",
+            params![source_path],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?;
+
+    let Some((local_path, content_type)) = asset else {
+        return Ok(None);
+    };
+
+    let bytes = fs::read(&local_path)?;
+    let mime_type = content_type
+        .as_deref()
+        .and_then(mime_type_from_shadertoy_ctype)
+        .or_else(|| mime_type_from_path(&local_path))
+        .unwrap_or("application/octet-stream");
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(Some(format!("data:{mime_type};base64,{encoded}")))
+}
+
+#[tauri::command]
 async fn import_shader_from_shadertoy(
     app: AppHandle,
     shader_id_or_url: String,
@@ -285,7 +314,13 @@ async fn import_shader_from_shadertoy(
 
     let url = format!("https://www.shadertoy.com/api/v1/shaders/{shader_id}?key={api_key}");
     let client = reqwest::Client::new();
-    let json: serde_json::Value = client.get(&url).send().await?.error_for_status()?.json().await?;
+    let json: serde_json::Value = client
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
     let shader = json
         .get("Shader")
         .cloned()
@@ -374,6 +409,32 @@ fn string_field(project: &serde_json::Value, key: &str, fallback: &str) -> Strin
         .to_string()
 }
 
+fn mime_type_from_shadertoy_ctype(ctype: &str) -> Option<&'static str> {
+    match ctype {
+        "texture" => None,
+        "video" => Some("video/mp4"),
+        "music" | "musicstream" => Some("audio/mpeg"),
+        _ => None,
+    }
+}
+
+fn mime_type_from_path(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit('.').next()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "mp4" => Some("video/mp4"),
+        "webm" => Some("video/webm"),
+        "mp3" => Some("audio/mpeg"),
+        "ogg" => Some("audio/ogg"),
+        "wav" => Some("audio/wav"),
+        _ => None,
+    }
+}
+
 async fn cache_shader_assets(
     app: &AppHandle,
     client: &reqwest::Client,
@@ -397,7 +458,13 @@ async fn cache_shader_assets(
             }
 
             let asset_url = format!("https://www.shadertoy.com{src}");
-            let bytes = client.get(&asset_url).send().await?.error_for_status()?.bytes().await?;
+            let bytes = client
+                .get(&asset_url)
+                .send()
+                .await?
+                .error_for_status()?
+                .bytes()
+                .await?;
             let digest = Sha256::digest(&bytes);
             let ext = src.rsplit('.').next().unwrap_or("asset");
             let filename = format!("{digest:x}.{ext}");
@@ -436,6 +503,7 @@ pub fn run() {
             load_last_project,
             load_project,
             save_project,
+            load_cached_asset_data_url,
             import_shader_from_shadertoy
         ])
         .run(tauri::generate_context!())

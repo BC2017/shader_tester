@@ -101,6 +101,14 @@ export async function saveProject(project: ShaderProject): Promise<StoredProject
   return invoke<StoredProject>("save_project", { project });
 }
 
+export async function loadCachedAssetDataUrl(assetId: string): Promise<string | null> {
+  if (!isTauri) {
+    return assetId.startsWith("data:") || assetId.startsWith("http") ? assetId : null;
+  }
+
+  return invoke<string | null>("load_cached_asset_data_url", { sourcePath: assetId });
+}
+
 export async function importShader(shaderIdOrUrl: string): Promise<ImportedShader> {
   if (!isTauri) {
     throw new Error("Run ShaderTester as a desktop app to import from Shadertoy.");
