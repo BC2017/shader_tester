@@ -298,6 +298,24 @@ input:focus {
   color: #d8e2dd;
 }
 
+.toolbar .save-command {
+  gap: 8px;
+  width: auto;
+  min-width: 86px;
+  padding: 0 11px;
+  background: #252c29;
+}
+
+.toolbar .save-command.dirty {
+  background: #55b79a;
+  color: #07110e;
+  font-weight: 700;
+}
+
+.toolbar .save-command span {
+  white-space: nowrap;
+}
+
 .ide-grid {
   display: grid;
   grid-template-columns: minmax(420px, 1fr) minmax(430px, 0.95fr);
