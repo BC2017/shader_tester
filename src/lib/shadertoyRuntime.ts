@@ -158,7 +158,7 @@ export class ShadertoyRuntime {
     this.frame = 0;
     this.startTime = performance.now();
     this.compileProject();
-    this.resize();
+    this.resize(true);
     this.loadProjectAssets();
   }
 
@@ -194,7 +194,7 @@ export class ShadertoyRuntime {
     this.emitStatus(true, "Paused");
   }
 
-  resize() {
+  resize(forceRebuildBuffers = false) {
     const rect = this.previewBounds();
     const cssWidth = rect.width || this.canvas.clientWidth;
     const cssHeight = rect.height || this.canvas.clientHeight;
@@ -211,6 +211,8 @@ export class ShadertoyRuntime {
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
+      this.rebuildBuffers(width, height);
+    } else if (forceRebuildBuffers) {
       this.rebuildBuffers(width, height);
     }
     return true;
