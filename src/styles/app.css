@@ -363,7 +363,7 @@ select:focus {
   background: #121514;
 }
 
-.editor-pane {
+.editor-pane.has-controls {
   grid-template-rows: 64px auto minmax(0, 1fr);
 }
 

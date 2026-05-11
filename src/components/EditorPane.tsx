@@ -13,6 +13,7 @@ interface EditorPaneProps {
 export function EditorPane({ pass, showMinimap, isActive, controls, onChange }: EditorPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const hasControls = Boolean(controls);
 
   const layoutEditor = useCallback(() => {
     const container = containerRef.current;
@@ -70,7 +71,7 @@ export function EditorPane({ pass, showMinimap, isActive, controls, onChange }: 
   }, [isActive, layoutEditor, pass.id]);
 
   return (
-    <section className="editor-pane" aria-label="Shader editor">
+    <section className={hasControls ? "editor-pane has-controls" : "editor-pane"} aria-label="Shader editor">
       <div className="pane-header">
         <div>
           <span className="eyebrow">GLSL</span>

@@ -51,7 +51,7 @@ function App() {
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
   const [isPreviewPaused, setIsPreviewPaused] = useState(false);
   const [showEditorMinimap, setShowEditorMinimap] = useState(true);
-  const [showChannelEditor, setShowChannelEditor] = useState(true);
+  const [showChannelEditor, setShowChannelEditor] = useState(false);
 
   const refreshProjectSummaries = useCallback(async () => {
     try {
@@ -76,7 +76,6 @@ function App() {
     Promise.all([loadSettings(), loadLastProject()])
       .then(([settings, storedProject]) => {
         if (settings.shadertoy_api_key) setApiKey(settings.shadertoy_api_key);
-        else setShowSetup(true);
         if (storedProject?.project) {
           activateProject(storedProject.project, `Loaded ${storedProject.name}`);
         } else {
@@ -86,7 +85,7 @@ function App() {
         void refreshProjectSummaries();
       })
       .catch(() => {
-        setShowSetup(true);
+        setSaveStatus("Starter project");
         setHasLoadedProject(true);
         void refreshProjectSummaries();
       });
