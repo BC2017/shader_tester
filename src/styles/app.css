@@ -25,7 +25,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -189,7 +190,8 @@ button {
   margin-bottom: 10px;
 }
 
-input {
+input,
+select {
   width: 100%;
   height: 36px;
   border: 1px solid #333c38;
@@ -200,7 +202,12 @@ input {
   color: #eef2f0;
 }
 
-input:focus {
+select {
+  appearance: none;
+}
+
+input:focus,
+select:focus {
   border-color: #55b79a;
 }
 
@@ -230,19 +237,41 @@ input:focus {
   display: flex;
   gap: 6px;
   min-width: 0;
+  overflow: auto;
 }
 
-.pass-tabs button {
+.pass-tabs button,
+.pass-actions button {
   height: 34px;
   border-radius: 7px;
   padding: 0 12px;
   background: transparent;
   color: #aeb8b3;
+  white-space: nowrap;
 }
 
 .pass-tabs button.active {
   background: #24312d;
   color: #f3fbf8;
+}
+
+.pass-actions {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.pass-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #2f3a35;
+  color: #c2d8d1;
+}
+
+.pass-actions button:hover {
+  background: #252c29;
 }
 
 .toolbar {
@@ -292,6 +321,10 @@ input:focus {
   background: #121514;
 }
 
+.editor-pane {
+  grid-template-rows: 64px auto minmax(0, 1fr);
+}
+
 .preview-pane {
   grid-template-rows: 64px minmax(0, 1fr) 38px;
   overflow: hidden;
@@ -305,6 +338,81 @@ input:focus {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.channel-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #27302c;
+  background: #151917;
+}
+
+.channel-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.channel-panel-header .eyebrow {
+  margin-bottom: 0;
+}
+
+.channel-panel-header > span:last-child {
+  color: #8d9994;
+  font-size: 12px;
+}
+
+.danger-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  border-radius: 7px;
+  padding: 0 9px;
+  background: #302220;
+  color: #ffb2a6;
+  font-size: 12px;
+}
+
+.channel-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.channel-row {
+  display: grid;
+  grid-template-columns: 76px minmax(120px, 1fr) minmax(82px, 0.4fr) minmax(82px, 0.4fr) 70px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.channel-row > label:first-child {
+  color: #dce5e0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.channel-row select {
+  min-width: 0;
+}
+
+.channel-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: #b9c5bf;
+  font-size: 12px;
+}
+
+.channel-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #55b79a;
 }
 
 .pane-header {

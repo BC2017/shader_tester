@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Code2, Download, KeyRound, Pause, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
+import { Code2, Download, KeyRound, Pause, Play, Plus, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
 import { upgradeProject } from "./lib/projectMigrations";
-import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
+import type { ShaderChannel, ShaderPass, ShaderProject } from "./lib/shaderTypes";
 import { shadertoyJsonToProject } from "./lib/shadertoyImport";
 import {
   importShader,
@@ -14,6 +14,21 @@ import {
 import { EditorPane } from "./components/EditorPane";
 import { PreviewPane } from "./components/PreviewPane";
 import { SetupPanel } from "./components/SetupPanel";
+import { ChannelPanel } from "./components/ChannelPanel";
+
+const bufferSlots = [
+  { id: "buffer-a", name: "Buffer A" },
+  { id: "buffer-b", name: "Buffer B" },
+  { id: "buffer-c", name: "Buffer C" },
+  { id: "buffer-d", name: "Buffer D" }
+];
+
+const defaultBufferCode = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy;
+    vec3 previous = texture(iChannel0, uv).rgb;
+    vec3 color = vec3(uv, 0.5 + 0.5 * sin(iTime));
+    fragColor = vec4(mix(color, previous, 0.12), 1.0);
+}`;
 
 function App() {
   const [project, setProject] = useState<ShaderProject>(() => freshDefaultProject());
@@ -69,6 +84,29 @@ function App() {
     () => project.passes.find((pass) => pass.id === activePassId) ?? project.passes[0],
     [activePassId, project.passes]
   );
+  const bufferPasses = useMemo(
+    () => project.passes.filter((pass) => pass.type === "buffer"),
+    [project.passes]
+  );
+  const missingBufferSlots = useMemo(
+    () => bufferSlots.filter((slot) => !project.passes.some((pass) => pass.id === slot.id)),
+    [project.passes]
+  );
+  const textureOptions = useMemo(() => {
+    const textures = new Map<string, { assetId: string; label: string; mediaType?: "image" | "video" | "audio" }>();
+    for (const pass of project.passes) {
+      for (const channel of pass.channels) {
+        if (channel.source.kind !== "texture") continue;
+        const assetId = channel.source.assetId;
+        textures.set(assetId, {
+          assetId,
+          mediaType: channel.source.mediaType,
+          label: mediaLabel(assetId, channel.source.mediaType)
+        });
+      }
+    }
+    return [...textures.values()];
+  }, [project.passes]);
 
   function updatePassCode(pass: ShaderPass, code: string) {
     setProject((current) => ({
@@ -77,6 +115,20 @@ function App() {
     }));
     setIsDirty(true);
     setSaveStatus("Unsaved changes");
+  }
+
+  function updatePassChannel(pass: ShaderPass, channel: ShaderChannel) {
+    setProject((current) => ({
+      ...current,
+      passes: current.passes.map((item) => {
+        if (item.id !== pass.id) return item;
+        const channels = [...item.channels.filter((existing) => existing.index !== channel.index), channel]
+          .sort((left, right) => left.index - right.index);
+        return { ...item, channels };
+      })
+    }));
+    setIsDirty(true);
+    setSaveStatus("Unsaved channel changes");
   }
 
   async function handleSaveApiKey(nextKey: string) {
@@ -111,6 +163,61 @@ function App() {
     setSaveStatus("Reset to starter shader");
     setImportStatus("");
   }, []);
+
+  const handleAddBuffer = useCallback((slot: { id: string; name: string }) => {
+    const nextPass: ShaderPass = {
+      id: slot.id,
+      name: slot.name,
+      type: "buffer",
+      code: defaultBufferCode,
+      channels: [
+        {
+          index: 0,
+          source: { kind: "buffer", passId: slot.id },
+          filter: "linear",
+          wrap: "clamp",
+          vflip: false
+        }
+      ]
+    };
+
+    setProject((current) => {
+      const imageIndex = current.passes.findIndex((pass) => pass.type === "image");
+      const insertIndex = imageIndex >= 0 ? imageIndex : current.passes.length;
+      return {
+        ...current,
+        passes: [
+          ...current.passes.slice(0, insertIndex),
+          nextPass,
+          ...current.passes.slice(insertIndex)
+        ]
+      };
+    });
+    setActivePassId(slot.id);
+    setIsDirty(true);
+    setSaveStatus(`Added ${slot.name}`);
+  }, []);
+
+  const handleRemoveActivePass = useCallback(() => {
+    if (activePass.type !== "buffer" || activePass.id === "buffer-a") return;
+    const removedPass = activePass;
+    setProject((current) => ({
+      ...current,
+      passes: current.passes
+        .filter((pass) => pass.id !== removedPass.id)
+        .map((pass) => ({
+          ...pass,
+          channels: pass.channels.map((channel) => (
+            channel.source.kind === "buffer" && channel.source.passId === removedPass.id
+              ? { ...channel, source: { kind: "none" as const } }
+              : channel
+          ))
+        }))
+    }));
+    setActivePassId("image");
+    setIsDirty(true);
+    setSaveStatus(`Removed ${removedPass.name}`);
+  }, [activePass]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -193,6 +300,16 @@ function App() {
               </button>
             ))}
           </div>
+          {missingBufferSlots.length > 0 && (
+            <div className="pass-actions" aria-label="Add buffer pass">
+              {missingBufferSlots.map((slot) => (
+                <button key={slot.id} type="button" onClick={() => handleAddBuffer(slot)}>
+                  <Plus size={14} />
+                  <span>{slot.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="toolbar">
             <button
               type="button"
@@ -224,6 +341,16 @@ function App() {
             pass={activePass}
             showMinimap={showEditorMinimap}
             onChange={(code) => updatePassCode(activePass, code)}
+            controls={(
+              <ChannelPanel
+                pass={activePass}
+                bufferPasses={bufferPasses}
+                textureOptions={textureOptions}
+                canRemovePass={activePass.type === "buffer" && activePass.id !== "buffer-a"}
+                onChannelChange={(channel) => updatePassChannel(activePass, channel)}
+                onRemovePass={handleRemoveActivePass}
+              />
+            )}
           />
           <PreviewPane project={project} isPaused={isPreviewPaused} saveStatus={saveStatus} />
         </div>
@@ -246,6 +373,12 @@ function App() {
 
 function freshDefaultProject(): ShaderProject {
   return JSON.parse(JSON.stringify(defaultProject)) as ShaderProject;
+}
+
+function mediaLabel(assetId: string, mediaType?: "image" | "video" | "audio") {
+  const pathParts = assetId.split("/").filter(Boolean);
+  const pathPart = pathParts[pathParts.length - 1] ?? assetId;
+  return mediaType ? `${pathPart} (${mediaType})` : pathPart;
 }
 
 export default App;
