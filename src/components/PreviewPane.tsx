@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Activity } from "lucide-react";
 import type { RuntimeStats, ShaderProject } from "../lib/shaderTypes";
 import { ShadertoyRuntime } from "../lib/shadertoyRuntime";
+import { loadCachedAssetDataUrl } from "../lib/tauriApi";
 
 interface PreviewPaneProps {
   project: ShaderProject;
@@ -26,7 +27,9 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
 
     let runtime: ShadertoyRuntime;
     try {
-      runtime = new ShadertoyRuntime(canvas);
+      runtime = new ShadertoyRuntime(canvas, {
+        loadAsset: loadCachedAssetDataUrl
+      });
     } catch (error) {
       setStatus({
         ok: false,

@@ -20,6 +20,10 @@ type BufferTarget = {
   height: number;
 };
 
+type RuntimeOptions = {
+  loadAsset?: (assetId: string) => Promise<string | null>;
+};
+
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 aPosition;
@@ -37,7 +41,10 @@ export class ShadertoyRuntime {
   private project?: ShaderProject;
   private programs = new Map<string, CompiledProgram>();
   private buffers = new Map<string, BufferTarget>();
+  private assetTextures = new Map<string, WebGLTexture>();
+  private loadingAssets = new Set<string>();
   private bufferWarning = "";
+  private assetWarning = "";
   private animation = 0;
   private startTime = performance.now();
   private lastFrameTime = this.startTime;
@@ -46,7 +53,7 @@ export class ShadertoyRuntime {
   private mouse = [0, 0, 0, 0];
   private statusHandler?: (status: RuntimeStatus) => void;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, private options: RuntimeOptions = {}) {
     const gl = canvas.getContext("webgl2", {
       alpha: false,
       antialias: false,
@@ -98,6 +105,7 @@ export class ShadertoyRuntime {
     this.startTime = performance.now();
     this.compileProject();
     this.resize();
+    this.loadProjectAssets();
   }
 
   updatePass(passId: string, code: string) {
@@ -318,6 +326,77 @@ void main() {
     }
   }
 
+  private loadProjectAssets() {
+    if (!this.project || !this.options.loadAsset) return;
+
+    const textureIds = new Set<string>();
+    for (const pass of this.project.passes) {
+      for (const channel of pass.channels) {
+        if (channel.source.kind === "texture") {
+          textureIds.add(channel.source.assetId);
+        }
+      }
+    }
+
+    for (const assetId of textureIds) {
+      if (this.assetTextures.has(assetId) || this.loadingAssets.has(assetId)) continue;
+      this.loadingAssets.add(assetId);
+      this.options.loadAsset(assetId)
+        .then((url) => {
+          if (!url) {
+            this.assetWarning = `Missing texture asset: ${assetId}`;
+            return;
+          }
+          return this.loadImageTexture(assetId, url);
+        })
+        .catch((error) => {
+          this.assetWarning = `Texture load failed: ${error instanceof Error ? error.message : String(error)}`;
+        })
+        .finally(() => {
+          this.loadingAssets.delete(assetId);
+        });
+    }
+  }
+
+  private loadImageTexture(assetId: string, url: string) {
+    return new Promise<void>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const texture = this.createImageTexture(image);
+          const previous = this.assetTextures.get(assetId);
+          if (previous) this.gl.deleteTexture(previous);
+          this.assetTextures.set(assetId, texture);
+          this.assetWarning = "";
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      };
+      image.onerror = () => reject(new Error(`Could not decode image texture ${assetId}`));
+      image.src = url;
+    });
+  }
+
+  private createImageTexture(image: TexImageSource) {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) throw new Error("Failed to create image texture.");
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      throw new Error(`Failed to upload image texture: 0x${error.toString(16)}`);
+    }
+    return texture;
+  }
+
   private createBufferTarget(width: number, height: number): BufferTarget {
     const gl = this.gl;
     const target = {
@@ -423,7 +502,7 @@ void main() {
     }
 
     this.frame += 1;
-    this.emitStatus(true, this.bufferWarning || "Rendering");
+    this.emitStatus(true, this.assetWarning || this.bufferWarning || "Rendering");
   }
 
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
@@ -471,6 +550,9 @@ void main() {
     if (channel.source.kind === "buffer") {
       return this.buffers.get(channel.source.passId)?.read ?? this.fallbackTexture;
     }
+    if (channel.source.kind === "texture") {
+      return this.assetTextures.get(channel.source.assetId) ?? this.fallbackTexture;
+    }
     return this.fallbackTexture;
   }
 
@@ -482,6 +564,10 @@ void main() {
         const buffer = this.buffers.get(channel.source.passId);
         values[index * 3] = buffer?.width ?? 0;
         values[index * 3 + 1] = buffer?.height ?? 0;
+        values[index * 3 + 2] = 1;
+      } else if (channel?.source.kind === "texture" && this.assetTextures.has(channel.source.assetId)) {
+        values[index * 3] = 1;
+        values[index * 3 + 1] = 1;
         values[index * 3 + 2] = 1;
       }
     }
