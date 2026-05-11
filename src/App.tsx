@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Code2, Download, FolderOpen, KeyRound, Play, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
 import { upgradeProject } from "./lib/projectMigrations";
@@ -25,6 +25,7 @@ function App() {
   const [importTarget, setImportTarget] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [saveStatus, setSaveStatus] = useState("Not saved");
+  const [isDirty, setIsDirty] = useState(false);
   const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [showSetup, setShowSetup] = useState(false);
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
@@ -39,6 +40,7 @@ function App() {
           setProject(upgradedProject);
           setActivePassId(upgradedProject.passes.find((pass) => pass.type === "image")?.id ?? upgradedProject.passes[0].id);
           setSaveStatus(`Loaded ${storedProject.name}`);
+          setIsDirty(false);
         } else {
           setSaveStatus("Starter project");
         }
@@ -58,6 +60,7 @@ function App() {
       saveProject(project)
         .then((storedProject) => {
           setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
+          setIsDirty(false);
           return listProjects();
         })
         .then(setProjectList)
@@ -77,6 +80,8 @@ function App() {
       ...current,
       passes: current.passes.map((item) => (item.id === pass.id ? { ...item, code } : item))
     }));
+    setIsDirty(true);
+    setSaveStatus("Unsaved changes");
   }
 
   async function handleSaveApiKey(nextKey: string) {
@@ -85,16 +90,28 @@ function App() {
     setShowSetup(false);
   }
 
-  async function handleManualSave() {
+  const handleManualSave = useCallback(async () => {
     setSaveStatus("Saving...");
     try {
       const storedProject = await saveProject(project);
       setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
+      setIsDirty(false);
       setProjectList(await listProjects());
     } catch (error) {
       setSaveStatus(error instanceof Error ? error.message : String(error));
     }
-  }
+  }, [project]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+      event.preventDefault();
+      void handleManualSave();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleManualSave]);
 
   async function handleLoadProject(projectId: string) {
     const storedProject = await loadProject(projectId);
@@ -103,6 +120,7 @@ function App() {
     setProject(upgradedProject);
     setActivePassId(upgradedProject.passes.find((pass) => pass.type === "image")?.id ?? upgradedProject.passes[0].id);
     setSaveStatus(`Loaded ${storedProject.name}`);
+    setIsDirty(false);
     setProjectList(await listProjects());
   }
 
@@ -115,6 +133,7 @@ function App() {
       setProject(importedProject);
       setActivePassId(importedProject.passes.find((pass) => pass.type === "image")?.id ?? importedProject.passes[0].id);
       setImportStatus(`Imported ${imported.title}. It is stored locally and editable.`);
+      setIsDirty(false);
       setProjectList(await listProjects());
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : String(error));
@@ -219,8 +238,14 @@ function App() {
             <button type="button" title="Run">
               <Play size={16} />
             </button>
-            <button type="button" title="Save" onClick={handleManualSave}>
+            <button
+              type="button"
+              className={isDirty ? "save-command dirty" : "save-command"}
+              title="Save changes"
+              onClick={handleManualSave}
+            >
               <Save size={16} />
+              <span>{isDirty ? "Save Changes" : "Saved"}</span>
             </button>
             <button type="button" title="API key" onClick={() => setShowSetup(true)}>
               <KeyRound size={16} />

@@ -298,6 +298,24 @@ input:focus {
   color: #d8e2dd;
 }
 
+.toolbar .save-command {
+  gap: 8px;
+  width: auto;
+  min-width: 86px;
+  padding: 0 11px;
+  background: #252c29;
+}
+
+.toolbar .save-command.dirty {
+  background: #55b79a;
+  color: #07110e;
+  font-weight: 700;
+}
+
+.toolbar .save-command span {
+  white-space: nowrap;
+}
+
 .ide-grid {
   display: grid;
   grid-template-columns: minmax(420px, 1fr) minmax(430px, 0.95fr);
@@ -352,14 +370,15 @@ input:focus {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  max-width: 320px;
+  max-width: min(720px, 58vw);
   font-size: 12px;
 }
 
 .render-status span {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .render-status.ok {
