@@ -22,20 +22,22 @@ type BufferTarget = {
 
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
-const vec2 positions[3] = vec2[3](
-  vec2(-1.0, -1.0),
-  vec2(3.0, -1.0),
-  vec2(-1.0, 3.0)
-);
+layout(location = 0) in vec2 aPosition;
 void main() {
-  gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+  gl_Position = vec4(aPosition, 0.0, 1.0);
 }`;
 
 export class ShadertoyRuntime {
   private gl: WebGL2RenderingContext;
+  private vao: WebGLVertexArrayObject;
+  private vertexBuffer: WebGLBuffer;
+  private fallbackTexture: WebGLTexture;
+  private maxRenderWidth: number;
+  private maxRenderHeight: number;
   private project?: ShaderProject;
   private programs = new Map<string, CompiledProgram>();
   private buffers = new Map<string, BufferTarget>();
+  private bufferWarning = "";
   private animation = 0;
   private startTime = performance.now();
   private lastFrameTime = this.startTime;
@@ -57,6 +59,31 @@ export class ShadertoyRuntime {
     }
 
     this.gl = gl;
+    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    const maxViewportDims = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+    this.maxRenderWidth = Math.max(1, Math.min(maxTextureSize, maxViewportDims[0]));
+    this.maxRenderHeight = Math.max(1, Math.min(maxTextureSize, maxViewportDims[1]));
+
+    const vao = gl.createVertexArray();
+    if (!vao) {
+      throw new Error("Failed to create WebGL vertex array.");
+    }
+    this.vao = vao;
+    gl.bindVertexArray(this.vao);
+    const vertexBuffer = gl.createBuffer();
+    if (!vertexBuffer) {
+      throw new Error("Failed to create WebGL vertex buffer.");
+    }
+    this.vertexBuffer = vertexBuffer;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.fallbackTexture = this.createSolidTexture([0, 0, 0, 255]);
     this.bindPointerEvents();
   }
 
@@ -105,8 +132,8 @@ export class ShadertoyRuntime {
       return false;
     }
 
-    const width = Math.max(1, Math.floor(cssWidth * window.devicePixelRatio));
-    const height = Math.max(1, Math.floor(cssHeight * window.devicePixelRatio));
+    const width = this.stableRenderDimension(cssWidth, this.maxRenderWidth);
+    const height = this.stableRenderDimension(cssHeight, this.maxRenderHeight);
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
@@ -135,10 +162,18 @@ export class ShadertoyRuntime {
 
   private pointer(event: PointerEvent): [number, number] {
     const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
     return [
-      (event.clientX - rect.left) * window.devicePixelRatio,
-      (rect.bottom - event.clientY) * window.devicePixelRatio
+      (event.clientX - rect.left) * scaleX,
+      (rect.bottom - event.clientY) * scaleY
     ];
+  }
+
+  private stableRenderDimension(cssPixels: number, maxDimension: number) {
+    const dimension = Math.min(maxDimension, Math.max(2, Math.floor(cssPixels)));
+    if (dimension <= 2) return Math.max(1, dimension);
+    return dimension % 2 === 0 ? dimension : dimension - 1;
   }
 
   private compileProject() {
@@ -260,21 +295,34 @@ void main() {
       this.gl.deleteFramebuffer(target.framebuffer);
     });
     this.buffers.clear();
+    this.bufferWarning = "";
 
     for (const pass of this.project.passes.filter((item) => item.type === "buffer")) {
-      this.buffers.set(pass.id, this.createBufferTarget(width, height));
+      try {
+        this.buffers.set(pass.id, this.createBufferTarget(width, height));
+      } catch (error) {
+        this.bufferWarning = `${pass.name} disabled: ${error instanceof Error ? error.message : String(error)}`;
+      }
     }
   }
 
   private createBufferTarget(width: number, height: number): BufferTarget {
     const gl = this.gl;
-    return {
+    const target = {
       read: this.createTexture(width, height),
       write: this.createTexture(width, height),
-      framebuffer: gl.createFramebuffer() as WebGLFramebuffer,
+      framebuffer: gl.createFramebuffer(),
       width,
       height
     };
+
+    if (!target.framebuffer) {
+      throw new Error("Failed to create framebuffer.");
+    }
+
+    this.assertFramebufferComplete(target, target.write);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return target;
   }
 
   private createTexture(width: number, height: number) {
@@ -286,8 +334,45 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      throw new Error(`Failed to allocate render texture ${width}x${height}: 0x${error.toString(16)}`);
+    }
     return texture;
+  }
+
+  private createSolidTexture(color: [number, number, number, number]) {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) throw new Error("Failed to create fallback texture.");
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array(color)
+    );
+    return texture;
+  }
+
+  private assertFramebufferComplete(target: BufferTarget, texture: WebGLTexture) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error(`Framebuffer incomplete for ${target.width}x${target.height} render target: 0x${status.toString(16)}`);
+    }
   }
 
   private render() {
@@ -306,8 +391,12 @@ void main() {
       if (pass.type === "buffer") {
         const target = this.buffers.get(pass.id);
         if (!target) continue;
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, target.framebuffer);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, target.write, 0);
+        try {
+          this.assertFramebufferComplete(target, target.write);
+        } catch (error) {
+          this.emitStatus(false, error instanceof Error ? error.message : String(error));
+          return;
+        }
         this.draw(compiled, time, delta, target.width, target.height);
         [target.read, target.write] = [target.write, target.read];
       } else {
@@ -317,12 +406,14 @@ void main() {
     }
 
     this.frame += 1;
-    this.emitStatus(true, "Rendering");
+    this.emitStatus(true, this.bufferWarning || "Rendering");
   }
 
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
     const gl = this.gl;
     gl.viewport(0, 0, width, height);
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.useProgram(compiled.program);
     const uniforms = compiled.uniforms;
 
@@ -343,15 +434,19 @@ void main() {
     }
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      this.emitStatus(false, `WebGL draw error: 0x${error.toString(16)}`);
+    }
   }
 
   private textureForChannel(pass: ShaderPass, index: number): WebGLTexture | null {
     const channel = pass.channels.find((item) => item.index === index);
-    if (!channel || channel.source.kind === "none") return null;
+    if (!channel || channel.source.kind === "none") return this.fallbackTexture;
     if (channel.source.kind === "buffer") {
-      return this.buffers.get(channel.source.passId)?.read ?? null;
+      return this.buffers.get(channel.source.passId)?.read ?? this.fallbackTexture;
     }
-    return null;
+    return this.fallbackTexture;
   }
 
   private channelResolutions(pass: ShaderPass) {

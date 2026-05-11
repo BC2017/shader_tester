@@ -14,20 +14,24 @@ const BUFFER_A_CODE = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     p.x *= iResolution.x / iResolution.y;
 
     float d = length(p);
-    float wave = sin(16.0 * d - iTime * 4.0);
-    float glow = smoothstep(0.018, 0.0, abs(wave) * d);
+    float angle = atan(p.y, p.x);
+    float wave = 0.5 + 0.5 * cos(9.0 * d - iTime * 2.4 + angle * 3.0);
+    float pulse = 0.5 + 0.5 * sin((p.x + p.y) * 5.0 + iTime * 1.8);
 
     vec4 previous = texture(iChannel0, uv);
-    vec3 color = mix(previous.rgb * 0.965, palette(d + iTime * 0.08) * glow, 0.72);
+    vec3 base = palette(d * 0.55 + wave * 0.35 + iTime * 0.08);
+    vec3 color = base * (0.35 + 0.45 * wave + 0.2 * pulse);
+    color = mix(color, previous.rgb, 0.18);
     fragColor = vec4(color, 1.0);
 }`;
 
 const IMAGE_CODE = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;
     vec3 bufferColor = texture(iChannel0, uv).rgb;
+    vec3 fallback = palette(uv.x * 0.45 + uv.y * 0.35 + iTime * 0.08) * (0.35 + 0.25 * sin(iTime + uv.x * 8.0));
     vec2 vignetteUv = uv * (1.0 - uv.yx);
     float vignette = pow(vignetteUv.x * vignetteUv.y * 18.0, 0.18);
-    fragColor = vec4(bufferColor * vignette, 1.0);
+    fragColor = vec4(max(bufferColor, fallback) * vignette, 1.0);
 }`;
 
 export const defaultProject: ShaderProject = {
