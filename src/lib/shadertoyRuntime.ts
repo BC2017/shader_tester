@@ -48,6 +48,7 @@ export class ShadertoyRuntime {
   private bufferWarning = "";
   private assetWarning = "";
   private animation = 0;
+  private isRunning = false;
   private startTime = performance.now();
   private lastFrameTime = this.startTime;
   private frame = 0;
@@ -120,6 +121,9 @@ export class ShadertoyRuntime {
   }
 
   start() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    this.lastFrameTime = performance.now();
     const tick = () => {
       this.render();
       this.animation = requestAnimationFrame(tick);
@@ -130,6 +134,13 @@ export class ShadertoyRuntime {
 
   stop() {
     cancelAnimationFrame(this.animation);
+    this.animation = 0;
+    this.isRunning = false;
+  }
+
+  pause() {
+    this.stop();
+    this.emitStatus(true, "Paused");
   }
 
   resize() {

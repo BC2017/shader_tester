@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Code2, Download, FolderOpen, KeyRound, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
+import { Code2, Download, FolderOpen, KeyRound, Pause, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
 import { upgradeProject } from "./lib/projectMigrations";
 import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
@@ -29,7 +29,7 @@ function App() {
   const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [showSetup, setShowSetup] = useState(false);
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
-  const [previewRunId, setPreviewRunId] = useState(0);
+  const [isPreviewPaused, setIsPreviewPaused] = useState(false);
 
   useEffect(() => {
     Promise.all([loadSettings(), loadLastProject(), listProjects()])
@@ -103,9 +103,11 @@ function App() {
     }
   }, [project]);
 
-  const handleRestartPreview = useCallback(() => {
-    setPreviewRunId((current) => current + 1);
-    setSaveStatus("Preview restarted");
+  const handleTogglePreview = useCallback(() => {
+    setIsPreviewPaused((current) => {
+      setSaveStatus(current ? "Preview resumed" : "Preview paused");
+      return !current;
+    });
   }, []);
 
   const handleResetStarter = useCallback(() => {
@@ -250,8 +252,12 @@ function App() {
             ))}
           </div>
           <div className="toolbar">
-            <button type="button" title="Restart preview" onClick={handleRestartPreview}>
-              <Play size={16} />
+            <button
+              type="button"
+              title={isPreviewPaused ? "Resume preview" : "Pause preview"}
+              onClick={handleTogglePreview}
+            >
+              {isPreviewPaused ? <Play size={16} /> : <Pause size={16} />}
             </button>
             <button type="button" title="Reset to starter shader" onClick={handleResetStarter}>
               <RotateCcw size={16} />
@@ -273,7 +279,7 @@ function App() {
 
         <div className="ide-grid">
           <EditorPane pass={activePass} onChange={(code) => updatePassCode(activePass, code)} />
-          <PreviewPane key={previewRunId} project={project} saveStatus={saveStatus} />
+          <PreviewPane project={project} isPaused={isPreviewPaused} saveStatus={saveStatus} />
         </div>
       </section>
 
