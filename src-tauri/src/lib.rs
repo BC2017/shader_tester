@@ -62,7 +62,9 @@ struct ProjectSummary {
     id: String,
     name: String,
     author: String,
+    description: String,
     tags: Vec<String>,
+    source_url: Option<String>,
     updated_at: String,
 }
 
@@ -146,20 +148,22 @@ fn save_shadertoy_api_key(app: AppHandle, api_key: String) -> Result<(), AppErro
 fn list_projects(app: AppHandle) -> Result<Vec<ProjectSummary>, AppError> {
     let conn = db(&app)?;
     let mut statement = conn.prepare(
-        "select id, name, author, tags, updated_at
+        "select id, name, author, description, tags, source_url, updated_at
          from projects
          order by datetime(coalesce(last_opened_at, updated_at)) desc, name asc",
     )?;
 
     let projects = statement
         .query_map([], |row| {
-            let tags_json: String = row.get(3)?;
+            let tags_json: String = row.get(4)?;
             Ok(ProjectSummary {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 author: row.get(2)?,
+                description: row.get(3)?,
                 tags: serde_json::from_str(&tags_json).unwrap_or_default(),
-                updated_at: row.get(4)?,
+                source_url: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -269,6 +273,13 @@ fn save_project(app: AppHandle, project: serde_json::Value) -> Result<StoredProj
         updated_at: now,
         project,
     })
+}
+
+#[tauri::command]
+fn delete_project(app: AppHandle, project_id: String) -> Result<(), AppError> {
+    let conn = db(&app)?;
+    conn.execute("delete from projects where id = ?1", params![project_id])?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -503,6 +514,7 @@ pub fn run() {
             load_last_project,
             load_project,
             save_project,
+            delete_project,
             load_cached_asset_data_url,
             import_shader_from_shadertoy
         ])
