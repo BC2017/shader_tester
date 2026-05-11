@@ -46,6 +46,13 @@ export class ShadertoyRuntime {
   private vao: WebGLVertexArrayObject;
   private vertexBuffer: WebGLBuffer;
   private fallbackTexture: WebGLTexture;
+  private keyboardTexture: WebGLTexture;
+  private keyboardPixels = new Uint8Array(256 * 3 * 4);
+  private pressedKeys = new Set<number>();
+  private toggledKeys = new Set<number>();
+  private renderTextureInternalFormat: number;
+  private renderTextureType: number;
+  private renderTextureFilter: number;
   private maxRenderWidth: number;
   private maxRenderHeight: number;
   private project?: ShaderProject;
@@ -83,6 +90,14 @@ export class ShadertoyRuntime {
     }
 
     this.gl = gl;
+    const hasFloatRenderTargets = Boolean(gl.getExtension("EXT_color_buffer_float"));
+    const hasFloatLinearFiltering = Boolean(gl.getExtension("OES_texture_float_linear"));
+    this.renderTextureInternalFormat = hasFloatRenderTargets ? gl.RGBA32F : gl.RGBA;
+    this.renderTextureType = hasFloatRenderTargets ? gl.FLOAT : gl.UNSIGNED_BYTE;
+    this.renderTextureFilter = hasFloatRenderTargets && !hasFloatLinearFiltering ? gl.NEAREST : gl.LINEAR;
+    if (!hasFloatRenderTargets) {
+      this.bufferWarning = "Floating-point buffer targets unavailable; multipass buffers may lose precision";
+    }
     const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     const maxViewportDims = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
     this.maxRenderWidth = Math.max(1, Math.min(maxTextureSize, maxViewportDims[0]));
@@ -108,7 +123,9 @@ export class ShadertoyRuntime {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.fallbackTexture = this.createSolidTexture([0, 0, 0, 255]);
+    this.keyboardTexture = this.createKeyboardTexture();
     this.bindPointerEvents();
+    this.bindKeyboardEvents();
   }
 
   onStatus(handler: (status: RuntimeStatus) => void) {
@@ -200,6 +217,23 @@ export class ShadertoyRuntime {
       const point = this.pointer(event);
       this.mouse = [point[0], point[1], -Math.abs(this.mouse[2]), -Math.abs(this.mouse[3])];
       this.canvas.releasePointerCapture(event.pointerId);
+    });
+  }
+
+  private bindKeyboardEvents() {
+    window.addEventListener("keydown", (event) => {
+      const code = event.keyCode;
+      if (code < 0 || code > 255) return;
+      if (!event.repeat) {
+        if (this.toggledKeys.has(code)) this.toggledKeys.delete(code);
+        else this.toggledKeys.add(code);
+      }
+      this.pressedKeys.add(code);
+    });
+    window.addEventListener("keyup", (event) => {
+      const code = event.keyCode;
+      if (code < 0 || code > 255) return;
+      this.pressedKeys.delete(code);
     });
   }
 
@@ -592,11 +626,21 @@ void main() {
     const texture = gl.createTexture();
     if (!texture) throw new Error("Failed to create texture.");
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, this.renderTextureFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, this.renderTextureFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      this.renderTextureInternalFormat,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      this.renderTextureType,
+      null
+    );
     const error = gl.getError();
     if (error !== gl.NO_ERROR) {
       throw new Error(`Failed to allocate render texture ${width}x${height}: 0x${error.toString(16)}`);
@@ -624,6 +668,19 @@ void main() {
       gl.UNSIGNED_BYTE,
       new Uint8Array(color)
     );
+    return texture;
+  }
+
+  private createKeyboardTexture() {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) throw new Error("Failed to create keyboard texture.");
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 3, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.keyboardPixels);
     return texture;
   }
 
@@ -694,6 +751,7 @@ void main() {
     const gl = this.gl;
     this.updateVideoTextures();
     this.updateAudioTextures(time);
+    this.updateKeyboardTexture();
     gl.viewport(0, 0, width, height);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -820,6 +878,9 @@ void main() {
     if (channel.source.kind === "texture") {
       return this.assetTextures.get(channel.source.assetId) ?? this.fallbackTexture;
     }
+    if (channel.source.kind === "keyboard") {
+      return this.keyboardTexture;
+    }
     return this.fallbackTexture;
   }
 
@@ -837,9 +898,35 @@ void main() {
         values[index * 3] = width;
         values[index * 3 + 1] = height;
         values[index * 3 + 2] = 1;
+      } else if (channel?.source.kind === "keyboard") {
+        values[index * 3] = 256;
+        values[index * 3 + 1] = 3;
+        values[index * 3 + 2] = 1;
       }
     }
     return values;
+  }
+
+  private updateKeyboardTexture() {
+    this.keyboardPixels.fill(0);
+    for (const code of this.pressedKeys) {
+      this.writeKeyboardPixel(code, 0, 255);
+    }
+    for (const code of this.toggledKeys) {
+      this.writeKeyboardPixel(code, 2, 255);
+    }
+
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.keyboardTexture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 3, gl.RGBA, gl.UNSIGNED_BYTE, this.keyboardPixels);
+  }
+
+  private writeKeyboardPixel(code: number, row: number, value: number) {
+    const offset = (row * 256 + code) * 4;
+    this.keyboardPixels[offset] = value;
+    this.keyboardPixels[offset + 1] = value;
+    this.keyboardPixels[offset + 2] = value;
+    this.keyboardPixels[offset + 3] = 255;
   }
 
   private dateUniform() {

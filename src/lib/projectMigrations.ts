@@ -1,4 +1,4 @@
-import type { ShaderProject } from "./shaderTypes";
+import type { ShaderChannel, ShaderProject } from "./shaderTypes";
 
 const reversedSmoothstep = "smoothstep(0.018, 0.0, abs(wave) * d)";
 const stableGlow = "1.0 - smoothstep(0.0, 0.018, abs(wave) * d)";
@@ -32,6 +32,8 @@ const visibleStarterImage = `void mainImage(out vec4 fragColor, in vec2 fragCoor
 }`;
 
 export function upgradeProject(project: ShaderProject): ShaderProject {
+  const terrainProject = repairMousePaintTerrainProject(project);
+  if (terrainProject !== project) return terrainProject;
   if (project.id !== "starter") return project;
 
   let changed = false;
@@ -61,4 +63,81 @@ export function upgradeProject(project: ShaderProject): ShaderProject {
   });
 
   return changed ? { ...project, passes } : project;
+}
+
+function repairMousePaintTerrainProject(project: ShaderProject): ShaderProject {
+  const hasTerrainShader = project.passes.some((pass) => pass.code.includes("Advanced terrain erosion filter"));
+  const hasMousePaintBuffer = project.passes.some((pass) => pass.code.includes("Raw height map painted with the mouse"));
+  if (!hasTerrainShader || !hasMousePaintBuffer) return project;
+
+  let changed = false;
+  const passes = project.passes.map((pass) => {
+    if (pass.id === "buffer-a") {
+      const channels = [
+        bufferChannel(0, "buffer-a"),
+        keyboardChannel(1)
+      ];
+      if (JSON.stringify(pass.channels) !== JSON.stringify(channels)) changed = true;
+      return { ...pass, channels };
+    }
+
+    if (pass.id === "buffer-b") {
+      const channels = [
+        bufferChannel(0, "buffer-a"),
+        keyboardChannel(1)
+      ];
+      if (JSON.stringify(pass.channels) !== JSON.stringify(channels)) changed = true;
+      return { ...pass, channels };
+    }
+
+    if (pass.id === "buffer-c") {
+      if (pass.channels.length > 0) changed = true;
+      return { ...pass, channels: [] };
+    }
+
+    if (pass.id === "image") {
+      const existingChannel2 = pass.channels.find((channel) => channel.index === 2);
+      const channels = [
+        bufferChannel(0, "buffer-b"),
+        bufferChannel(1, "buffer-c"),
+        existingChannel2?.source.kind === "texture" ? existingChannel2 : noneChannel(2)
+      ];
+      if (JSON.stringify(pass.channels) !== JSON.stringify(channels)) changed = true;
+      return { ...pass, channels };
+    }
+
+    return pass;
+  });
+
+  return changed ? { ...project, passes } : project;
+}
+
+function bufferChannel(index: number, passId: string): ShaderChannel {
+  return {
+    index,
+    source: { kind: "buffer", passId },
+    filter: "linear",
+    wrap: "clamp",
+    vflip: false
+  };
+}
+
+function keyboardChannel(index: number): ShaderChannel {
+  return {
+    index,
+    source: { kind: "keyboard" },
+    filter: "nearest",
+    wrap: "clamp",
+    vflip: false
+  };
+}
+
+function noneChannel(index: number): ShaderChannel {
+  return {
+    index,
+    source: { kind: "none" },
+    filter: "linear",
+    wrap: "clamp",
+    vflip: false
+  };
 }
