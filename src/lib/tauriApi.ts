@@ -27,7 +27,9 @@ export interface ProjectSummary {
   id: string;
   name: string;
   author: string;
+  description: string;
   tags: string[];
+  source_url?: string | null;
   updated_at: string;
 }
 
@@ -60,7 +62,9 @@ export async function listProjects(): Promise<ProjectSummary[]> {
       id: project.id,
       name: project.name,
       author: project.author,
+      description: project.description,
       tags: project.tags,
+      source_url: project.sourceUrl,
       updated_at: new Date().toISOString()
     }));
   }
@@ -99,6 +103,20 @@ export async function saveProject(project: ShaderProject): Promise<StoredProject
   }
 
   return invoke<StoredProject>("save_project", { project });
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  if (!isTauri) {
+    const nextProjects = localProjects().filter((project) => project.id !== projectId);
+    window.localStorage.setItem(projectsKey, JSON.stringify(nextProjects));
+    if (window.localStorage.getItem(lastProjectKey) === projectId) {
+      if (nextProjects[0]) window.localStorage.setItem(lastProjectKey, nextProjects[0].id);
+      else window.localStorage.removeItem(lastProjectKey);
+    }
+    return;
+  }
+
+  await invoke("delete_project", { projectId });
 }
 
 export async function loadCachedAssetDataUrl(assetId: string): Promise<string | null> {
