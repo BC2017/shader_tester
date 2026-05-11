@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Code2, Download, FolderOpen, KeyRound, Pause, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
+import { Code2, Download, KeyRound, Pause, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
 import { upgradeProject } from "./lib/projectMigrations";
 import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
 import { shadertoyJsonToProject } from "./lib/shadertoyImport";
 import {
   importShader,
-  listProjects,
   loadLastProject,
-  loadProject,
   loadSettings,
   saveApiKey,
-  saveProject,
-  type ProjectSummary
+  saveProject
 } from "./lib/tauriApi";
 import { EditorPane } from "./components/EditorPane";
 import { PreviewPane } from "./components/PreviewPane";
@@ -26,14 +23,14 @@ function App() {
   const [importStatus, setImportStatus] = useState("");
   const [saveStatus, setSaveStatus] = useState("Not saved");
   const [isDirty, setIsDirty] = useState(false);
-  const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [showSetup, setShowSetup] = useState(false);
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
   const [isPreviewPaused, setIsPreviewPaused] = useState(false);
+  const [showEditorMinimap, setShowEditorMinimap] = useState(true);
 
   useEffect(() => {
-    Promise.all([loadSettings(), loadLastProject(), listProjects()])
-      .then(([settings, storedProject, projects]) => {
+    Promise.all([loadSettings(), loadLastProject()])
+      .then(([settings, storedProject]) => {
         if (settings.shadertoy_api_key) setApiKey(settings.shadertoy_api_key);
         else setShowSetup(true);
         if (storedProject?.project) {
@@ -45,7 +42,6 @@ function App() {
         } else {
           setSaveStatus("Starter project");
         }
-        setProjectList(projects);
         setHasLoadedProject(true);
       })
       .catch(() => {
@@ -62,9 +58,7 @@ function App() {
         .then((storedProject) => {
           setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
           setIsDirty(false);
-          return listProjects();
         })
-        .then(setProjectList)
         .catch((error) => setSaveStatus(error instanceof Error ? error.message : String(error)));
     }, 600);
 
@@ -97,7 +91,6 @@ function App() {
       const storedProject = await saveProject(project);
       setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
       setIsDirty(false);
-      setProjectList(await listProjects());
     } catch (error) {
       setSaveStatus(error instanceof Error ? error.message : String(error));
     }
@@ -130,17 +123,6 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleManualSave]);
 
-  async function handleLoadProject(projectId: string) {
-    const storedProject = await loadProject(projectId);
-    if (!storedProject?.project) return;
-    const upgradedProject = upgradeProject(storedProject.project);
-    setProject(upgradedProject);
-    setActivePassId(upgradedProject.passes.find((pass) => pass.type === "image")?.id ?? upgradedProject.passes[0].id);
-    setSaveStatus(`Loaded ${storedProject.name}`);
-    setIsDirty(false);
-    setProjectList(await listProjects());
-  }
-
   async function handleImport() {
     setImportStatus("Importing shader and caching assets...");
     try {
@@ -151,7 +133,6 @@ function App() {
       setActivePassId(importedProject.passes.find((pass) => pass.type === "image")?.id ?? importedProject.passes[0].id);
       setImportStatus(`Imported ${imported.title}. It is stored locally and editable.`);
       setIsDirty(false);
-      setProjectList(await listProjects());
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : String(error));
     }
@@ -175,50 +156,11 @@ function App() {
             <Code2 size={17} />
             Workspace
           </button>
-          <button className="nav-item" type="button">
-            <FolderOpen size={17} />
-            Library
-          </button>
           <button className="nav-item" type="button" onClick={() => setShowSetup(true)}>
             <Settings size={17} />
             Settings
           </button>
         </nav>
-
-        <section className="library-panel">
-          <div className="section-title">
-            <span className="eyebrow">Library</span>
-            <span>{projectList.length}</span>
-          </div>
-          <div className="project-list">
-            {projectList.length === 0 ? (
-              <p>No saved projects yet.</p>
-            ) : (
-              projectList.map((savedProject) => (
-                <button
-                  key={savedProject.id}
-                  className={savedProject.id === project.id ? "active" : ""}
-                  type="button"
-                  onClick={() => handleLoadProject(savedProject.id)}
-                >
-                  <strong>{savedProject.name}</strong>
-                  <span>{savedProject.author}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section className="project-card">
-          <span className="eyebrow">Current Project</span>
-          <h2>{project.name}</h2>
-          <p>{project.description}</p>
-          <div className="tag-row">
-            {project.tags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-        </section>
 
         <section className="import-panel">
           <label htmlFor="import-target">Import from Shadertoy</label>
@@ -278,7 +220,11 @@ function App() {
         </header>
 
         <div className="ide-grid">
-          <EditorPane pass={activePass} onChange={(code) => updatePassCode(activePass, code)} />
+          <EditorPane
+            pass={activePass}
+            showMinimap={showEditorMinimap}
+            onChange={(code) => updatePassCode(activePass, code)}
+          />
           <PreviewPane project={project} isPaused={isPreviewPaused} saveStatus={saveStatus} />
         </div>
       </section>
@@ -286,8 +232,12 @@ function App() {
       {showSetup && (
         <SetupPanel
           initialApiKey={apiKey}
+          showEditorMinimap={showEditorMinimap}
+          isPreviewPaused={isPreviewPaused}
           onClose={() => setShowSetup(false)}
           onSave={handleSaveApiKey}
+          onShowEditorMinimapChange={setShowEditorMinimap}
+          onPreviewPausedChange={setIsPreviewPaused}
         />
       )}
     </main>

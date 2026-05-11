@@ -79,7 +79,6 @@ button {
 
 .brand span,
 .eyebrow,
-.project-card p,
 .import-panel p,
 .setup-modal p,
 .stats-row {
@@ -123,9 +122,8 @@ button {
   background: #252c29;
 }
 
-.project-card,
 .import-panel,
-.library-panel {
+.settings-section {
   border: 1px solid #2c3430;
   border-radius: 8px;
   padding: 14px;
@@ -141,71 +139,11 @@ button {
   text-transform: uppercase;
 }
 
-.project-card h2 {
-  margin: 0 0 8px;
-  font-size: 18px;
-}
-
-.project-card p,
 .import-panel p,
-.project-list p {
+.settings-section p {
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
-}
-
-.library-panel {
-  min-height: 0;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.section-title span:last-child {
-  color: #9da8a3;
-  font-size: 12px;
-}
-
-.project-list {
-  display: grid;
-  gap: 6px;
-  max-height: 178px;
-  overflow: auto;
-}
-
-.project-list button {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  min-height: 48px;
-  border-radius: 7px;
-  padding: 8px 10px;
-  background: transparent;
-  text-align: left;
-}
-
-.project-list button:hover,
-.project-list button.active {
-  background: #252c29;
-}
-
-.project-list strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-}
-
-.project-list span {
-  overflow: hidden;
-  color: #9da8a3;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tag-row {
@@ -228,7 +166,14 @@ button {
   margin-top: auto;
 }
 
-.import-panel label,
+.import-panel label {
+  display: block;
+  margin-bottom: 8px;
+  color: #dce5e0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .setup-modal label {
   display: block;
   margin-bottom: 8px;
@@ -466,7 +411,7 @@ canvas {
 .setup-modal {
   position: relative;
   z-index: 1001;
-  width: min(560px, 100%);
+  width: min(620px, 100%);
   border: 1px solid #39423e;
   border-radius: 8px;
   padding: 18px;
@@ -492,8 +437,49 @@ canvas {
   font-size: 18px;
 }
 
+.settings-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.settings-section-title {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.settings-section-title svg {
+  color: #74cdb3;
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
 .setup-modal p {
   line-height: 1.45;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  margin: 0;
+  color: #dce5e0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-toggle input {
+  order: 2;
+  width: 18px;
+  height: 18px;
+  accent-color: #55b79a;
 }
 
 .setup-modal footer {
