@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Code2, Download, FolderOpen, KeyRound, Play, Save, Settings, Sparkles } from "lucide-react";
+import { Code2, Download, FolderOpen, KeyRound, Play, RotateCcw, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
 import { upgradeProject } from "./lib/projectMigrations";
 import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
@@ -19,7 +19,7 @@ import { PreviewPane } from "./components/PreviewPane";
 import { SetupPanel } from "./components/SetupPanel";
 
 function App() {
-  const [project, setProject] = useState<ShaderProject>(defaultProject);
+  const [project, setProject] = useState<ShaderProject>(() => freshDefaultProject());
   const [activePassId, setActivePassId] = useState("buffer-a");
   const [apiKey, setApiKey] = useState("");
   const [importTarget, setImportTarget] = useState("");
@@ -29,6 +29,7 @@ function App() {
   const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [showSetup, setShowSetup] = useState(false);
   const [hasLoadedProject, setHasLoadedProject] = useState(false);
+  const [previewRunId, setPreviewRunId] = useState(0);
 
   useEffect(() => {
     Promise.all([loadSettings(), loadLastProject(), listProjects()])
@@ -101,6 +102,20 @@ function App() {
       setSaveStatus(error instanceof Error ? error.message : String(error));
     }
   }, [project]);
+
+  const handleRestartPreview = useCallback(() => {
+    setPreviewRunId((current) => current + 1);
+    setSaveStatus("Preview restarted");
+  }, []);
+
+  const handleResetStarter = useCallback(() => {
+    const starterProject = freshDefaultProject();
+    setProject(starterProject);
+    setActivePassId(starterProject.passes.find((pass) => pass.type === "image")?.id ?? starterProject.passes[0].id);
+    setIsDirty(true);
+    setSaveStatus("Reset to starter shader");
+    setImportStatus("");
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -235,8 +250,11 @@ function App() {
             ))}
           </div>
           <div className="toolbar">
-            <button type="button" title="Run">
+            <button type="button" title="Restart preview" onClick={handleRestartPreview}>
               <Play size={16} />
+            </button>
+            <button type="button" title="Reset to starter shader" onClick={handleResetStarter}>
+              <RotateCcw size={16} />
             </button>
             <button
               type="button"
@@ -255,7 +273,7 @@ function App() {
 
         <div className="ide-grid">
           <EditorPane pass={activePass} onChange={(code) => updatePassCode(activePass, code)} />
-          <PreviewPane project={project} saveStatus={saveStatus} />
+          <PreviewPane key={previewRunId} project={project} saveStatus={saveStatus} />
         </div>
       </section>
 
@@ -268,6 +286,10 @@ function App() {
       )}
     </main>
   );
+}
+
+function freshDefaultProject(): ShaderProject {
+  return JSON.parse(JSON.stringify(defaultProject)) as ShaderProject;
 }
 
 export default App;
