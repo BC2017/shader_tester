@@ -42,6 +42,7 @@ export class ShadertoyRuntime {
   private startTime = performance.now();
   private lastFrameTime = this.startTime;
   private frame = 0;
+  private shaderError = "";
   private mouse = [0, 0, 0, 0];
   private statusHandler?: (status: RuntimeStatus) => void;
 
@@ -184,7 +185,13 @@ export class ShadertoyRuntime {
     try {
       for (const pass of this.project.passes) {
         if (pass.type === "common" || pass.type === "sound") continue;
-        const program = this.createProgram(common, pass.code);
+        let program: WebGLProgram;
+        try {
+          program = this.createProgram(common, pass.code);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`${pass.name}: ${message}`);
+        }
         nextPrograms.set(pass.id, {
           pass,
           program,
@@ -193,10 +200,15 @@ export class ShadertoyRuntime {
       }
       this.programs.forEach(({ program }) => this.gl.deleteProgram(program));
       this.programs = nextPrograms;
+      this.shaderError = "";
       this.emitStatus(true, "Compiled");
     } catch (error) {
       nextPrograms.forEach(({ program }) => this.gl.deleteProgram(program));
-      this.emitStatus(false, error instanceof Error ? error.message : String(error));
+      this.programs.forEach(({ program }) => this.gl.deleteProgram(program));
+      this.programs.clear();
+      this.shaderError = `Shader Error: ${error instanceof Error ? error.message : String(error)}`;
+      this.clearPreview();
+      this.emitStatus(false, this.shaderError);
     }
   }
 
@@ -378,6 +390,11 @@ void main() {
   private render() {
     if (!this.project) return;
     if (!this.resize()) return;
+    if (this.shaderError) {
+      this.clearPreview();
+      this.emitStatus(false, this.shaderError);
+      return;
+    }
 
     const now = performance.now();
     const time = (now - this.startTime) / 1000;
@@ -438,6 +455,14 @@ void main() {
     if (error !== gl.NO_ERROR) {
       this.emitStatus(false, `WebGL draw error: 0x${error.toString(16)}`);
     }
+  }
+
+  private clearPreview() {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, Math.max(1, this.canvas.width), Math.max(1, this.canvas.height));
+    gl.clearColor(0.03, 0.015, 0.018, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
   private textureForChannel(pass: ShaderPass, index: number): WebGLTexture | null {

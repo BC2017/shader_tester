@@ -370,14 +370,15 @@ input:focus {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  max-width: 320px;
+  max-width: min(720px, 58vw);
   font-size: 12px;
 }
 
 .render-status span {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .render-status.ok {
