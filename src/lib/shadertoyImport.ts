@@ -77,7 +77,7 @@ function convertInput(input: ShadertoyInput): ShaderChannel {
     : input.ctype === "buffer" || input.src?.toLowerCase().includes("buffer")
       ? { kind: "buffer" as const, passId: bufferIds[(input.src ?? "").toLowerCase()] ?? "buffer-a" }
       : input.src
-        ? { kind: "texture" as const, assetId: input.src }
+        ? { kind: "texture" as const, assetId: input.src, mediaType: mediaTypeForInput(input) }
         : { kind: "none" as const };
 
   return {
@@ -87,6 +87,12 @@ function convertInput(input: ShadertoyInput): ShaderChannel {
     wrap: input.sampler?.wrap === "repeat" ? "repeat" : "clamp",
     vflip: input.sampler?.vflip === "true"
   };
+}
+
+function mediaTypeForInput(input: ShadertoyInput): "image" | "video" | "audio" {
+  if (input.ctype === "video") return "video";
+  if (input.ctype === "music" || input.ctype === "musicstream") return "audio";
+  return "image";
 }
 
 function passId(name: string, type: string) {
