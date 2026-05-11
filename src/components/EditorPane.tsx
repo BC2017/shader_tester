@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { ShaderPass } from "../lib/shaderTypes";
 
 interface EditorPaneProps {
   pass: ShaderPass;
   showMinimap: boolean;
+  controls?: ReactNode;
   onChange: (code: string) => void;
 }
 
-export function EditorPane({ pass, showMinimap, onChange }: EditorPaneProps) {
+export function EditorPane({ pass, showMinimap, controls, onChange }: EditorPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
@@ -58,6 +59,7 @@ export function EditorPane({ pass, showMinimap, onChange }: EditorPaneProps) {
         </div>
         <span className={`pass-pill ${pass.type}`}>{pass.type}</span>
       </div>
+      {controls}
       <div className="editor-body" ref={containerRef}>
         <Editor
           height="100%"
