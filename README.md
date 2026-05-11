@@ -29,6 +29,8 @@ ShaderTester is a cross-platform desktop shader IDE for building and editing Sha
   - `iChannelResolution`
   - `iChannelTime`
 - Setup modal for a Shadertoy API key
+- SQLite-backed editable project persistence
+- Project autosave with a local library list
 - Shadertoy import command that fetches shader JSON and caches referenced `/media/...` assets locally
 - Imported shaders are converted into editable local projects
 
@@ -67,10 +69,9 @@ cargo check
 
 ## Next Milestones
 
-1. Persist editable shader projects in SQLite, not only imported raw Shadertoy payloads.
-2. Wire cached image/video/audio assets into the WebGL runtime.
-3. Add Buffer B/C/D creation and channel editing UI.
-4. Add keyboard texture, webcam, microphone, and audio FFT inputs.
-5. Implement sound shader generation/playback.
-6. Add local gallery, thumbnails, tags, favorites, and search.
-7. Add portable import/export bundles.
+1. Wire cached image/video/audio assets into the WebGL runtime.
+2. Add Buffer B/C/D creation and channel editing UI.
+3. Add keyboard texture, webcam, microphone, and audio FFT inputs.
+4. Implement sound shader generation/playback.
+5. Add local gallery, thumbnails, tags, favorites, and search.
+6. Add portable import/export bundles.

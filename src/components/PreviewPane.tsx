@@ -5,6 +5,7 @@ import { ShadertoyRuntime } from "../lib/shadertoyRuntime";
 
 interface PreviewPaneProps {
   project: ShaderProject;
+  saveStatus: string;
 }
 
 const emptyStats: RuntimeStats = {
@@ -14,7 +15,7 @@ const emptyStats: RuntimeStats = {
   resolution: [0, 0]
 };
 
-export function PreviewPane({ project }: PreviewPaneProps) {
+export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<ShadertoyRuntime | null>(null);
   const [status, setStatus] = useState({ ok: true, message: "Waiting", stats: emptyStats });
@@ -61,6 +62,7 @@ export function PreviewPane({ project }: PreviewPaneProps) {
         <span>{Math.round(status.stats.fps)} fps</span>
         <span>Frame {status.stats.frame}</span>
         <span>{status.stats.resolution[0]} x {status.stats.resolution[1]}</span>
+        <span className="save-state">{saveStatus}</span>
       </footer>
     </section>
   );

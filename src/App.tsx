@@ -3,7 +3,16 @@ import { Code2, Download, FolderOpen, KeyRound, Play, Save, Settings, Sparkles }
 import { defaultProject } from "./lib/defaultProject";
 import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
 import { shadertoyJsonToProject } from "./lib/shadertoyImport";
-import { importShader, loadSettings, saveApiKey } from "./lib/tauriApi";
+import {
+  importShader,
+  listProjects,
+  loadLastProject,
+  loadProject,
+  loadSettings,
+  saveApiKey,
+  saveProject,
+  type ProjectSummary
+} from "./lib/tauriApi";
 import { EditorPane } from "./components/EditorPane";
 import { PreviewPane } from "./components/PreviewPane";
 import { SetupPanel } from "./components/SetupPanel";
@@ -14,16 +23,47 @@ function App() {
   const [apiKey, setApiKey] = useState("");
   const [importTarget, setImportTarget] = useState("");
   const [importStatus, setImportStatus] = useState("");
+  const [saveStatus, setSaveStatus] = useState("Not saved");
+  const [projectList, setProjectList] = useState<ProjectSummary[]>([]);
   const [showSetup, setShowSetup] = useState(false);
+  const [hasLoadedProject, setHasLoadedProject] = useState(false);
 
   useEffect(() => {
-    loadSettings()
-      .then((settings) => {
+    Promise.all([loadSettings(), loadLastProject(), listProjects()])
+      .then(([settings, storedProject, projects]) => {
         if (settings.shadertoy_api_key) setApiKey(settings.shadertoy_api_key);
         else setShowSetup(true);
+        if (storedProject?.project) {
+          setProject(storedProject.project);
+          setActivePassId(storedProject.project.passes.find((pass) => pass.type === "image")?.id ?? storedProject.project.passes[0].id);
+          setSaveStatus(`Loaded ${storedProject.name}`);
+        } else {
+          setSaveStatus("Starter project");
+        }
+        setProjectList(projects);
+        setHasLoadedProject(true);
       })
-      .catch(() => setShowSetup(true));
+      .catch(() => {
+        setShowSetup(true);
+        setHasLoadedProject(true);
+      });
   }, []);
+
+  useEffect(() => {
+    if (!hasLoadedProject) return;
+    setSaveStatus("Saving...");
+    const timeout = window.setTimeout(() => {
+      saveProject(project)
+        .then((storedProject) => {
+          setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
+          return listProjects();
+        })
+        .then(setProjectList)
+        .catch((error) => setSaveStatus(error instanceof Error ? error.message : String(error)));
+    }, 600);
+
+    return () => window.clearTimeout(timeout);
+  }, [hasLoadedProject, project]);
 
   const activePass = useMemo(
     () => project.passes.find((pass) => pass.id === activePassId) ?? project.passes[0],
@@ -43,14 +83,36 @@ function App() {
     setShowSetup(false);
   }
 
+  async function handleManualSave() {
+    setSaveStatus("Saving...");
+    try {
+      const storedProject = await saveProject(project);
+      setSaveStatus(`Saved ${new Date(storedProject.updated_at).toLocaleTimeString()}`);
+      setProjectList(await listProjects());
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleLoadProject(projectId: string) {
+    const storedProject = await loadProject(projectId);
+    if (!storedProject?.project) return;
+    setProject(storedProject.project);
+    setActivePassId(storedProject.project.passes.find((pass) => pass.type === "image")?.id ?? storedProject.project.passes[0].id);
+    setSaveStatus(`Loaded ${storedProject.name}`);
+    setProjectList(await listProjects());
+  }
+
   async function handleImport() {
     setImportStatus("Importing shader and caching assets...");
     try {
       const imported = await importShader(importTarget);
       const importedProject = shadertoyJsonToProject(imported.json, imported.source_url);
+      await saveProject(importedProject);
       setProject(importedProject);
       setActivePassId(importedProject.passes.find((pass) => pass.type === "image")?.id ?? importedProject.passes[0].id);
       setImportStatus(`Imported ${imported.title}. It is stored locally and editable.`);
+      setProjectList(await listProjects());
     } catch (error) {
       setImportStatus(error instanceof Error ? error.message : String(error));
     }
@@ -83,6 +145,30 @@ function App() {
             Settings
           </button>
         </nav>
+
+        <section className="library-panel">
+          <div className="section-title">
+            <span className="eyebrow">Library</span>
+            <span>{projectList.length}</span>
+          </div>
+          <div className="project-list">
+            {projectList.length === 0 ? (
+              <p>No saved projects yet.</p>
+            ) : (
+              projectList.map((savedProject) => (
+                <button
+                  key={savedProject.id}
+                  className={savedProject.id === project.id ? "active" : ""}
+                  type="button"
+                  onClick={() => handleLoadProject(savedProject.id)}
+                >
+                  <strong>{savedProject.name}</strong>
+                  <span>{savedProject.author}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
 
         <section className="project-card">
           <span className="eyebrow">Current Project</span>
@@ -130,7 +216,7 @@ function App() {
             <button type="button" title="Run">
               <Play size={16} />
             </button>
-            <button type="button" title="Save">
+            <button type="button" title="Save" onClick={handleManualSave}>
               <Save size={16} />
             </button>
             <button type="button" title="API key" onClick={() => setShowSetup(true)}>
@@ -141,7 +227,7 @@ function App() {
 
         <div className="ide-grid">
           <EditorPane pass={activePass} onChange={(code) => updatePassCode(activePass, code)} />
-          <PreviewPane project={project} />
+          <PreviewPane project={project} saveStatus={saveStatus} />
         </div>
       </section>
 

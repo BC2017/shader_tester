@@ -112,7 +112,8 @@ button {
 }
 
 .project-card,
-.import-panel {
+.import-panel,
+.library-panel {
   border: 1px solid #2c3430;
   border-radius: 8px;
   padding: 14px;
@@ -134,10 +135,65 @@ button {
 }
 
 .project-card p,
-.import-panel p {
+.import-panel p,
+.project-list p {
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.library-panel {
+  min-height: 0;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.section-title span:last-child {
+  color: #9da8a3;
+  font-size: 12px;
+}
+
+.project-list {
+  display: grid;
+  gap: 6px;
+  max-height: 178px;
+  overflow: auto;
+}
+
+.project-list button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: transparent;
+  text-align: left;
+}
+
+.project-list button:hover,
+.project-list button.active {
+  background: #252c29;
+}
+
+.project-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.project-list span {
+  overflow: hidden;
+  color: #9da8a3;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tag-row {
@@ -332,6 +388,13 @@ canvas {
   padding: 0 14px;
   border-top: 1px solid #27302c;
   font-size: 12px;
+}
+
+.save-state {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-backdrop {
