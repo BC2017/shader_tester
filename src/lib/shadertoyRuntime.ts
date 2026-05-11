@@ -22,17 +22,15 @@ type BufferTarget = {
 
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
-const vec2 positions[3] = vec2[3](
-  vec2(-1.0, -1.0),
-  vec2(3.0, -1.0),
-  vec2(-1.0, 3.0)
-);
+layout(location = 0) in vec2 aPosition;
 void main() {
-  gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+  gl_Position = vec4(aPosition, 0.0, 1.0);
 }`;
 
 export class ShadertoyRuntime {
   private gl: WebGL2RenderingContext;
+  private vao: WebGLVertexArrayObject;
+  private vertexBuffer: WebGLBuffer;
   private project?: ShaderProject;
   private programs = new Map<string, CompiledProgram>();
   private buffers = new Map<string, BufferTarget>();
@@ -57,6 +55,25 @@ export class ShadertoyRuntime {
     }
 
     this.gl = gl;
+    const vao = gl.createVertexArray();
+    if (!vao) {
+      throw new Error("Failed to create WebGL vertex array.");
+    }
+    this.vao = vao;
+    gl.bindVertexArray(this.vao);
+    const vertexBuffer = gl.createBuffer();
+    if (!vertexBuffer) {
+      throw new Error("Failed to create WebGL vertex buffer.");
+    }
+    this.vertexBuffer = vertexBuffer;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW
+    );
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.bindPointerEvents();
   }
 
@@ -308,6 +325,11 @@ void main() {
         if (!target) continue;
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, target.framebuffer);
         this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, target.write, 0);
+        const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
+        if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
+          this.emitStatus(false, `Framebuffer incomplete: 0x${status.toString(16)}`);
+          return;
+        }
         this.draw(compiled, time, delta, target.width, target.height);
         [target.read, target.write] = [target.write, target.read];
       } else {
@@ -323,6 +345,8 @@ void main() {
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
     const gl = this.gl;
     gl.viewport(0, 0, width, height);
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.useProgram(compiled.program);
     const uniforms = compiled.uniforms;
 
@@ -343,6 +367,10 @@ void main() {
     }
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      this.emitStatus(false, `WebGL draw error: 0x${error.toString(16)}`);
+    }
   }
 
   private textureForChannel(pass: ShaderPass, index: number): WebGLTexture | null {

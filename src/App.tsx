@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Code2, Download, FolderOpen, KeyRound, Play, Save, Settings, Sparkles } from "lucide-react";
 import { defaultProject } from "./lib/defaultProject";
+import { upgradeProject } from "./lib/projectMigrations";
 import type { ShaderPass, ShaderProject } from "./lib/shaderTypes";
 import { shadertoyJsonToProject } from "./lib/shadertoyImport";
 import {
@@ -34,8 +35,9 @@ function App() {
         if (settings.shadertoy_api_key) setApiKey(settings.shadertoy_api_key);
         else setShowSetup(true);
         if (storedProject?.project) {
-          setProject(storedProject.project);
-          setActivePassId(storedProject.project.passes.find((pass) => pass.type === "image")?.id ?? storedProject.project.passes[0].id);
+          const upgradedProject = upgradeProject(storedProject.project);
+          setProject(upgradedProject);
+          setActivePassId(upgradedProject.passes.find((pass) => pass.type === "image")?.id ?? upgradedProject.passes[0].id);
           setSaveStatus(`Loaded ${storedProject.name}`);
         } else {
           setSaveStatus("Starter project");
@@ -97,8 +99,9 @@ function App() {
   async function handleLoadProject(projectId: string) {
     const storedProject = await loadProject(projectId);
     if (!storedProject?.project) return;
-    setProject(storedProject.project);
-    setActivePassId(storedProject.project.passes.find((pass) => pass.type === "image")?.id ?? storedProject.project.passes[0].id);
+    const upgradedProject = upgradeProject(storedProject.project);
+    setProject(upgradedProject);
+    setActivePassId(upgradedProject.passes.find((pass) => pass.type === "image")?.id ?? upgradedProject.passes[0].id);
     setSaveStatus(`Loaded ${storedProject.name}`);
     setProjectList(await listProjects());
   }
