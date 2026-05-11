@@ -132,8 +132,8 @@ export class ShadertoyRuntime {
       return false;
     }
 
-    const width = Math.min(this.maxRenderWidth, Math.max(1, Math.floor(cssWidth * window.devicePixelRatio)));
-    const height = Math.min(this.maxRenderHeight, Math.max(1, Math.floor(cssHeight * window.devicePixelRatio)));
+    const width = this.stableRenderDimension(cssWidth, this.maxRenderWidth);
+    const height = this.stableRenderDimension(cssHeight, this.maxRenderHeight);
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
@@ -162,10 +162,18 @@ export class ShadertoyRuntime {
 
   private pointer(event: PointerEvent): [number, number] {
     const rect = this.canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
     return [
-      (event.clientX - rect.left) * window.devicePixelRatio,
-      (rect.bottom - event.clientY) * window.devicePixelRatio
+      (event.clientX - rect.left) * scaleX,
+      (rect.bottom - event.clientY) * scaleY
     ];
+  }
+
+  private stableRenderDimension(cssPixels: number, maxDimension: number) {
+    const dimension = Math.min(maxDimension, Math.max(2, Math.floor(cssPixels)));
+    if (dimension <= 2) return Math.max(1, dimension);
+    return dimension % 2 === 0 ? dimension : dimension - 1;
   }
 
   private compileProject() {
