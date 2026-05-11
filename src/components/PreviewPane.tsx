@@ -24,15 +24,34 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const runtime = new ShadertoyRuntime(canvas);
+    let runtime: ShadertoyRuntime;
+    try {
+      runtime = new ShadertoyRuntime(canvas);
+    } catch (error) {
+      setStatus({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+        stats: emptyStats
+      });
+      return;
+    }
+
     runtimeRef.current = runtime;
     runtime.onStatus(setStatus);
     runtime.load(project);
-    runtime.start();
+    const firstFrame = window.requestAnimationFrame(() => {
+      runtime.resize();
+      runtime.start();
+    });
 
     const resize = () => runtime.resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    if (canvas.parentElement) observer.observe(canvas.parentElement);
     window.addEventListener("resize", resize);
     return () => {
+      window.cancelAnimationFrame(firstFrame);
+      observer.disconnect();
       window.removeEventListener("resize", resize);
       runtime.stop();
       runtimeRef.current = null;

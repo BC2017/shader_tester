@@ -95,13 +95,24 @@ export class ShadertoyRuntime {
   }
 
   resize() {
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * window.devicePixelRatio));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * window.devicePixelRatio));
+    const rect = this.canvas.getBoundingClientRect();
+    const cssWidth = rect.width || this.canvas.clientWidth;
+    const cssHeight = rect.height || this.canvas.clientHeight;
+    const hasLayoutSize = cssWidth > 0 && cssHeight > 0;
+
+    if (!hasLayoutSize) {
+      this.emitStatus(false, "Waiting for preview layout");
+      return false;
+    }
+
+    const width = Math.max(1, Math.floor(cssWidth * window.devicePixelRatio));
+    const height = Math.max(1, Math.floor(cssHeight * window.devicePixelRatio));
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
       this.rebuildBuffers(width, height);
     }
+    return true;
   }
 
   private bindPointerEvents() {
@@ -281,7 +292,7 @@ void main() {
 
   private render() {
     if (!this.project) return;
-    this.resize();
+    if (!this.resize()) return;
 
     const now = performance.now();
     const time = (now - this.startTime) / 1000;
