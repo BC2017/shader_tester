@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Activity } from "lucide-react";
 import type { RuntimeStats, ShaderProject } from "../lib/shaderTypes";
 import { ShadertoyRuntime } from "../lib/shadertoyRuntime";
@@ -26,36 +26,50 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
   const runtimeRef = useRef<ShadertoyRuntime | null>(null);
   const [status, setStatus] = useState({ ok: true, message: "Waiting", stats: emptyStats });
   const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+  const [runtimeVersion, setRuntimeVersion] = useState(0);
+  const hasFrameSize = frameSize.width > 0 && frameSize.height > 0;
+  const frameStyle = useMemo(() => (
+    hasFrameSize
+      ? {
+        width: `${frameSize.width}px`,
+        height: `${frameSize.height}px`
+      }
+      : {
+        width: "0px",
+        height: "0px"
+      }
+  ), [frameSize.height, frameSize.width, hasFrameSize]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const wrap = canvasWrapRef.current;
     if (!wrap) return;
 
     let resizeFrame = 0;
-    const fitFrame = () => {
+    const measureFrame = () => {
+      const rect = wrap.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const width = Math.min(rect.width, rect.height * previewAspectRatio);
+      const height = width / previewAspectRatio;
+      setFrameSize((current) => (
+        Math.abs(current.width - width) < 0.5 && Math.abs(current.height - height) < 0.5
+          ? current
+          : { width, height }
+      ));
+    };
+    const scheduleMeasure = () => {
       window.cancelAnimationFrame(resizeFrame);
-      resizeFrame = window.requestAnimationFrame(() => {
-        const rect = wrap.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return;
-        const width = Math.min(rect.width, rect.height * previewAspectRatio);
-        const height = width / previewAspectRatio;
-        setFrameSize((current) => (
-          Math.abs(current.width - width) < 0.5 && Math.abs(current.height - height) < 0.5
-            ? current
-            : { width, height }
-        ));
-      });
+      resizeFrame = window.requestAnimationFrame(measureFrame);
     };
 
-    fitFrame();
-    const observer = new ResizeObserver(fitFrame);
+    measureFrame();
+    const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(wrap);
-    window.addEventListener("resize", fitFrame);
+    window.addEventListener("resize", scheduleMeasure);
 
     return () => {
       window.cancelAnimationFrame(resizeFrame);
       observer.disconnect();
-      window.removeEventListener("resize", fitFrame);
+      window.removeEventListener("resize", scheduleMeasure);
     };
   }, []);
 
@@ -80,11 +94,13 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
     runtimeRef.current = runtime;
     runtime.onStatus(setStatus);
     runtime.load(project);
-    const firstFrame = window.requestAnimationFrame(() => {
+    const rect = canvasFrameRef.current?.getBoundingClientRect();
+    if (rect && rect.width > 0 && rect.height > 0) {
       runtime.resize();
       if (isPaused) runtime.pause();
       else runtime.start();
-    });
+    }
+    setRuntimeVersion((version) => version + 1);
 
     let resizeFrame = 0;
     const resize = () => {
@@ -95,7 +111,6 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
     if (canvasFrameRef.current) observer.observe(canvasFrameRef.current);
     window.addEventListener("resize", resize);
     return () => {
-      window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       window.removeEventListener("resize", resize);
@@ -111,9 +126,14 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
+    if (!hasFrameSize) {
+      runtime.pause();
+      return;
+    }
+    runtime.resize();
     if (isPaused) runtime.pause();
     else runtime.start();
-  }, [isPaused]);
+  }, [frameSize.height, frameSize.width, hasFrameSize, isPaused, runtimeVersion]);
 
   return (
     <section className="preview-pane" aria-label="Shader preview">
@@ -131,10 +151,7 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
         <div
           className="canvas-frame"
           ref={canvasFrameRef}
-          style={frameSize.width > 0 && frameSize.height > 0 ? {
-            width: `${frameSize.width}px`,
-            height: `${frameSize.height}px`
-          } : undefined}
+          style={frameStyle}
         >
           <canvas ref={canvasRef} />
         </div>
