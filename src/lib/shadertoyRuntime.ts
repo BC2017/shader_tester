@@ -24,6 +24,16 @@ type RuntimeOptions = {
   loadAsset?: (assetId: string) => Promise<string | null>;
 };
 
+type AudioTextureState = {
+  analyser?: AnalyserNode;
+  source?: AudioBufferSourceNode;
+  decodedSamples?: Float32Array;
+  sampleRate: number;
+  frequencyData: Uint8Array<ArrayBuffer>;
+  waveformData: Uint8Array<ArrayBuffer>;
+  pixels: Uint8Array<ArrayBuffer>;
+};
+
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 aPosition;
@@ -43,8 +53,10 @@ export class ShadertoyRuntime {
   private buffers = new Map<string, BufferTarget>();
   private assetTextures = new Map<string, WebGLTexture>();
   private assetVideos = new Map<string, HTMLVideoElement>();
+  private assetAudios = new Map<string, AudioTextureState>();
   private assetDimensions = new Map<string, [number, number]>();
   private loadingAssets = new Set<string>();
+  private audioContext?: AudioContext;
   private bufferWarning = "";
   private assetWarning = "";
   private animation = 0;
@@ -369,10 +381,7 @@ void main() {
             return;
           }
           if (mediaType === "video") return this.loadVideoTexture(assetId, url);
-          if (mediaType === "audio") {
-            this.assetWarning = `Audio texture inputs are not implemented yet: ${assetId}`;
-            return;
-          }
+          if (mediaType === "audio") return this.loadAudioTexture(assetId, url);
           return this.loadImageTexture(assetId, url);
         })
         .catch((error) => {
@@ -435,6 +444,76 @@ void main() {
       video.src = url;
       video.load();
     });
+  }
+
+  private loadAudioTexture(assetId: string, url: string) {
+    const texture = this.createAudioTexture();
+    const previous = this.assetTextures.get(assetId);
+    if (previous) this.gl.deleteTexture(previous);
+
+    const state: AudioTextureState = {
+      sampleRate: 44100,
+      frequencyData: new Uint8Array(512),
+      waveformData: new Uint8Array(512),
+      pixels: new Uint8Array(512 * 2 * 4)
+    };
+    state.waveformData.fill(128);
+
+    this.assetTextures.set(assetId, texture);
+    this.assetAudios.set(assetId, state);
+    this.assetDimensions.set(assetId, [512, 2]);
+    this.assetWarning = "";
+
+    return this.decodeAudioTexture(assetId, url, state);
+  }
+
+  private async decodeAudioTexture(assetId: string, url: string, state: AudioTextureState) {
+    try {
+      const response = await fetch(url);
+      const audioData = await response.arrayBuffer();
+      const context = this.audioContext ?? new AudioContext();
+      this.audioContext = context;
+      const buffer = await context.decodeAudioData(audioData.slice(0));
+      state.decodedSamples = buffer.getChannelData(0);
+      state.sampleRate = buffer.sampleRate;
+      this.configureAudioAnalyser(state, buffer);
+      await this.startAudioPlayback(assetId);
+    } catch (error) {
+      this.assetWarning = `Audio texture load failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  private configureAudioAnalyser(state: AudioTextureState, buffer: AudioBuffer) {
+    if (state.analyser || state.source) return;
+    const context = this.audioContext ?? new AudioContext();
+    this.audioContext = context;
+    const source = context.createBufferSource();
+    const analyser = context.createAnalyser();
+    const silentGain = context.createGain();
+    source.buffer = buffer;
+    source.loop = true;
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.65;
+    silentGain.gain.value = 0;
+    source.connect(analyser);
+    analyser.connect(silentGain);
+    silentGain.connect(context.destination);
+    source.start();
+    state.source = source;
+    state.analyser = analyser;
+  }
+
+  private async startAudioPlayback(assetId: string) {
+    try {
+      if (this.audioContext?.state === "suspended") {
+        await this.audioContext.resume();
+      }
+      if (this.assetWarning.includes(assetId)) {
+        this.assetWarning = "";
+      }
+    } catch {
+      this.assetWarning = `Audio texture loaded but playback is paused: ${assetId}`;
+    }
   }
 
   private createImageTexture(image: TexImageSource) {
@@ -515,6 +594,19 @@ void main() {
     return texture;
   }
 
+  private createAudioTexture() {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) throw new Error("Failed to create audio texture.");
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return texture;
+  }
+
   private assertFramebufferComplete(target: BufferTarget, texture: WebGLTexture) {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
@@ -567,6 +659,7 @@ void main() {
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
     const gl = this.gl;
     this.updateVideoTextures();
+    this.updateAudioTextures(time);
     gl.viewport(0, 0, width, height);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -607,6 +700,72 @@ void main() {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
       this.assetDimensions.set(assetId, [video.videoWidth || 1, video.videoHeight || 1]);
     }
+  }
+
+  private updateAudioTextures(time: number) {
+    const gl = this.gl;
+    for (const [assetId, state] of this.assetAudios) {
+      const texture = this.assetTextures.get(assetId);
+      if (!texture) continue;
+      let hasAnalyserData = false;
+      if (state.analyser) {
+        state.analyser.getByteFrequencyData(state.frequencyData);
+        state.analyser.getByteTimeDomainData(state.waveformData);
+        hasAnalyserData = state.frequencyData.some((value) => value > 0) || state.waveformData.some((value) => value !== 128);
+      }
+      if (!hasAnalyserData && state.decodedSamples) {
+        this.writeDecodedAudioTexture(state, time);
+      }
+
+      for (let index = 0; index < 512; index += 1) {
+        const frequency = state.frequencyData[index];
+        const waveform = state.waveformData[index];
+        const frequencyOffset = index * 4;
+        const waveformOffset = (512 + index) * 4;
+        state.pixels[frequencyOffset] = frequency;
+        state.pixels[frequencyOffset + 1] = frequency;
+        state.pixels[frequencyOffset + 2] = frequency;
+        state.pixels[frequencyOffset + 3] = 255;
+        state.pixels[waveformOffset] = waveform;
+        state.pixels[waveformOffset + 1] = waveform;
+        state.pixels[waveformOffset + 2] = waveform;
+        state.pixels[waveformOffset + 3] = 255;
+      }
+
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, 2, gl.RGBA, gl.UNSIGNED_BYTE, state.pixels);
+    }
+  }
+
+  private writeDecodedAudioTexture(state: AudioTextureState, time: number) {
+    const samples = state.decodedSamples;
+    if (!samples?.length) return;
+
+    const sampleBase = Math.floor(time * state.sampleRate) % samples.length;
+    for (let index = 0; index < 512; index += 1) {
+      const sampleIndex = (sampleBase + index) % samples.length;
+      state.waveformData[index] = this.normalizedAudioByte(samples[sampleIndex]);
+      state.frequencyData[index] = this.frequencyMagnitude(samples, sampleBase, index, state.sampleRate);
+    }
+  }
+
+  private normalizedAudioByte(sample: number) {
+    return Math.max(0, Math.min(255, Math.round((sample * 0.5 + 0.5) * 255)));
+  }
+
+  private frequencyMagnitude(samples: Float32Array, sampleBase: number, bin: number, sampleRate: number) {
+    const sampleCount = 128;
+    const frequency = (bin / 512) * (sampleRate / 2);
+    let real = 0;
+    let imaginary = 0;
+    for (let index = 0; index < sampleCount; index += 1) {
+      const sample = samples[(sampleBase + index) % samples.length];
+      const phase = (2 * Math.PI * frequency * index) / sampleRate;
+      real += sample * Math.cos(phase);
+      imaginary -= sample * Math.sin(phase);
+    }
+    const magnitude = Math.sqrt(real * real + imaginary * imaginary) / sampleCount;
+    return Math.max(0, Math.min(255, Math.round(magnitude * 768)));
   }
 
   private clearPreview() {
