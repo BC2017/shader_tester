@@ -34,6 +34,7 @@ ShaderTester is a cross-platform desktop shader IDE for building and editing Sha
 - Shadertoy import command that fetches shader JSON and caches referenced `/media/...` assets locally
 - Imported shaders are converted into editable local projects
 - Cached imported image textures can be loaded into `iChannel0..3`
+- Cached imported video textures can be loaded into `iChannel0..3`
 
 ## Development
 
@@ -70,7 +71,7 @@ cargo check
 
 ## Next Milestones
 
-1. Expand cached media support to video and audio inputs.
+1. Expand cached media support to audio inputs.
 2. Add Buffer B/C/D creation and channel editing UI.
 3. Add keyboard texture, webcam, microphone, and audio FFT inputs.
 4. Implement sound shader generation/playback.

@@ -42,6 +42,8 @@ export class ShadertoyRuntime {
   private programs = new Map<string, CompiledProgram>();
   private buffers = new Map<string, BufferTarget>();
   private assetTextures = new Map<string, WebGLTexture>();
+  private assetVideos = new Map<string, HTMLVideoElement>();
+  private assetDimensions = new Map<string, [number, number]>();
   private loadingAssets = new Set<string>();
   private bufferWarning = "";
   private assetWarning = "";
@@ -329,22 +331,27 @@ void main() {
   private loadProjectAssets() {
     if (!this.project || !this.options.loadAsset) return;
 
-    const textureIds = new Set<string>();
+    const textureIds = new Map<string, "image" | "video" | "audio">();
     for (const pass of this.project.passes) {
       for (const channel of pass.channels) {
         if (channel.source.kind === "texture") {
-          textureIds.add(channel.source.assetId);
+          textureIds.set(channel.source.assetId, channel.source.mediaType ?? "image");
         }
       }
     }
 
-    for (const assetId of textureIds) {
+    for (const [assetId, mediaType] of textureIds) {
       if (this.assetTextures.has(assetId) || this.loadingAssets.has(assetId)) continue;
       this.loadingAssets.add(assetId);
       this.options.loadAsset(assetId)
         .then((url) => {
           if (!url) {
             this.assetWarning = `Missing texture asset: ${assetId}`;
+            return;
+          }
+          if (mediaType === "video") return this.loadVideoTexture(assetId, url);
+          if (mediaType === "audio") {
+            this.assetWarning = `Audio texture inputs are not implemented yet: ${assetId}`;
             return;
           }
           return this.loadImageTexture(assetId, url);
@@ -367,6 +374,7 @@ void main() {
           const previous = this.assetTextures.get(assetId);
           if (previous) this.gl.deleteTexture(previous);
           this.assetTextures.set(assetId, texture);
+          this.assetDimensions.set(assetId, [image.naturalWidth || 1, image.naturalHeight || 1]);
           this.assetWarning = "";
           resolve();
         } catch (error) {
@@ -375,6 +383,38 @@ void main() {
       };
       image.onerror = () => reject(new Error(`Could not decode image texture ${assetId}`));
       image.src = url;
+    });
+  }
+
+  private loadVideoTexture(assetId: string, url: string) {
+    return new Promise<void>((resolve, reject) => {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = "auto";
+
+      video.addEventListener("loadeddata", () => {
+        try {
+          const texture = this.createSolidTexture([0, 0, 0, 255]);
+          const previous = this.assetTextures.get(assetId);
+          if (previous) this.gl.deleteTexture(previous);
+          this.assetTextures.set(assetId, texture);
+          this.assetVideos.set(assetId, video);
+          this.assetDimensions.set(assetId, [video.videoWidth || 1, video.videoHeight || 1]);
+          void video.play().catch(() => {
+            this.assetWarning = `Video texture loaded but playback is paused: ${assetId}`;
+          });
+          this.assetWarning = "";
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, { once: true });
+
+      video.onerror = () => reject(new Error(`Could not decode video texture ${assetId}`));
+      video.src = url;
+      video.load();
     });
   }
 
@@ -507,6 +547,7 @@ void main() {
 
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
     const gl = this.gl;
+    this.updateVideoTextures();
     gl.viewport(0, 0, width, height);
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -533,6 +574,19 @@ void main() {
     const error = gl.getError();
     if (error !== gl.NO_ERROR) {
       this.emitStatus(false, `WebGL draw error: 0x${error.toString(16)}`);
+    }
+  }
+
+  private updateVideoTextures() {
+    const gl = this.gl;
+    for (const [assetId, video] of this.assetVideos) {
+      const texture = this.assetTextures.get(assetId);
+      if (!texture || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) continue;
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+      this.assetDimensions.set(assetId, [video.videoWidth || 1, video.videoHeight || 1]);
     }
   }
 
@@ -566,8 +620,9 @@ void main() {
         values[index * 3 + 1] = buffer?.height ?? 0;
         values[index * 3 + 2] = 1;
       } else if (channel?.source.kind === "texture" && this.assetTextures.has(channel.source.assetId)) {
-        values[index * 3] = 1;
-        values[index * 3 + 1] = 1;
+        const [width, height] = this.assetDimensions.get(channel.source.assetId) ?? [1, 1];
+        values[index * 3] = width;
+        values[index * 3 + 1] = height;
         values[index * 3 + 2] = 1;
       }
     }
