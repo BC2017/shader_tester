@@ -34,6 +34,27 @@ type AudioTextureState = {
   pixels: Uint8Array<ArrayBuffer>;
 };
 
+function replaceFunction(source: string, returnType: string, name: string, replacement: string) {
+  const pattern = new RegExp(`\\b${returnType}\\s+${name}\\s*\\(`);
+  const match = pattern.exec(source);
+  if (!match) return source;
+
+  const bodyStart = source.indexOf("{", match.index);
+  if (bodyStart < 0) return source;
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return `${source.slice(0, match.index)}${replacement}${source.slice(index + 1)}`;
+    }
+  }
+
+  return source;
+}
+
 const VERTEX_SHADER = `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 aPosition;
@@ -380,10 +401,31 @@ void main() {
   }
 
   private normalizeShaderCode(code: string) {
-    return code
+    const normalized = code
       .split(/\r?\n/)
       .filter((line) => !/^#extension\s+(GL_OES_standard_derivatives|GL_EXT_shader_texture_lod)\s*:/.test(line.trim()))
       .join("\n");
+    return this.replaceBitPackingHelpers(normalized);
+  }
+
+  private replaceBitPackingHelpers(code: string) {
+    if (!code.includes("intBitsToFloat") && !code.includes("floatBitsToInt")) return code;
+
+    const packReplacement = `float pack4(in vec4 rgba) {
+    vec3 bytes = floor(clamp(rgba.rgb, 0.0, 1.0) * 255.0 + 0.5);
+    return dot(bytes, vec3(1.0, 256.0, 65536.0)) / 16777215.0;
+}`;
+    const unpackReplacement = `vec4 unpack4(in float col) {
+    float value = floor(clamp(col, 0.0, 1.0) * 16777215.0 + 0.5);
+    float r = mod(value, 256.0);
+    value = floor(value / 256.0);
+    float g = mod(value, 256.0);
+    value = floor(value / 256.0);
+    float b = mod(value, 256.0);
+    return vec4(r, g, b, 0.0) / 255.0;
+}`;
+
+    return replaceFunction(replaceFunction(code, "float", "pack4", packReplacement), "vec4", "unpack4", unpackReplacement);
   }
 
   private collectUniforms(program: WebGLProgram) {
@@ -416,6 +458,9 @@ void main() {
     });
     this.buffers.clear();
     this.bufferWarning = "";
+    this.frame = 0;
+    this.startTime = performance.now();
+    this.lastFrameTime = this.startTime;
 
     for (const pass of this.project.passes.filter((item) => item.type === "buffer")) {
       try {
@@ -887,21 +932,22 @@ void main() {
   private channelResolutions(pass: ShaderPass) {
     const values = new Float32Array(12);
     for (let index = 0; index < 4; index += 1) {
+      values[index * 3] = 1;
+      values[index * 3 + 1] = 1;
+      values[index * 3 + 2] = 1;
+
       const channel = pass.channels.find((item) => item.index === index);
       if (channel?.source.kind === "buffer") {
         const buffer = this.buffers.get(channel.source.passId);
-        values[index * 3] = buffer?.width ?? 0;
-        values[index * 3 + 1] = buffer?.height ?? 0;
-        values[index * 3 + 2] = 1;
+        values[index * 3] = buffer?.width ?? 1;
+        values[index * 3 + 1] = buffer?.height ?? 1;
       } else if (channel?.source.kind === "texture" && this.assetTextures.has(channel.source.assetId)) {
         const [width, height] = this.assetDimensions.get(channel.source.assetId) ?? [1, 1];
         values[index * 3] = width;
         values[index * 3 + 1] = height;
-        values[index * 3 + 2] = 1;
       } else if (channel?.source.kind === "keyboard") {
         values[index * 3] = 256;
         values[index * 3 + 1] = 3;
-        values[index * 3 + 2] = 1;
       }
     }
     return values;
