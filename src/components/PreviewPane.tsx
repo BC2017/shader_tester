@@ -6,6 +6,7 @@ import { loadCachedAssetDataUrl } from "../lib/tauriApi";
 
 interface PreviewPaneProps {
   project: ShaderProject;
+  isPaused: boolean;
   saveStatus: string;
 }
 
@@ -16,7 +17,7 @@ const emptyStats: RuntimeStats = {
   resolution: [0, 0]
 };
 
-export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
+export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasWrapRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ShadertoyRuntime | null>(null);
@@ -45,7 +46,8 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
     runtime.load(project);
     const firstFrame = window.requestAnimationFrame(() => {
       runtime.resize();
-      runtime.start();
+      if (isPaused) runtime.pause();
+      else runtime.start();
     });
 
     let resizeFrame = 0;
@@ -69,6 +71,13 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
   useEffect(() => {
     runtimeRef.current?.load(project);
   }, [project]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    if (isPaused) runtime.pause();
+    else runtime.start();
+  }, [isPaused]);
 
   return (
     <section className="preview-pane" aria-label="Shader preview">

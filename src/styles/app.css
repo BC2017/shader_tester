@@ -352,6 +352,16 @@ input:focus {
   overflow: hidden;
 }
 
+.editor-pane {
+  overflow: hidden;
+}
+
+.editor-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .pane-header {
   display: flex;
   align-items: center;
