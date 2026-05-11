@@ -285,13 +285,17 @@ void main() {
 
   private createBufferTarget(width: number, height: number): BufferTarget {
     const gl = this.gl;
-    return {
+    const target = {
       read: this.createTexture(width, height),
       write: this.createTexture(width, height),
       framebuffer: gl.createFramebuffer() as WebGLFramebuffer,
       width,
       height
     };
+
+    this.assertFramebufferComplete(target, target.write);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return target;
   }
 
   private createTexture(width: number, height: number) {
@@ -303,8 +307,22 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      throw new Error(`Failed to allocate render texture ${width}x${height}: 0x${error.toString(16)}`);
+    }
     return texture;
+  }
+
+  private assertFramebufferComplete(target: BufferTarget, texture: WebGLTexture) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error(`Framebuffer incomplete for ${target.width}x${target.height} render target: 0x${status.toString(16)}`);
+    }
   }
 
   private render() {
@@ -323,11 +341,10 @@ void main() {
       if (pass.type === "buffer") {
         const target = this.buffers.get(pass.id);
         if (!target) continue;
-        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, target.framebuffer);
-        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, target.write, 0);
-        const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
-        if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
-          this.emitStatus(false, `Framebuffer incomplete: 0x${status.toString(16)}`);
+        try {
+          this.assertFramebufferComplete(target, target.write);
+        } catch (error) {
+          this.emitStatus(false, error instanceof Error ? error.message : String(error));
           return;
         }
         this.draw(compiled, time, delta, target.width, target.height);
