@@ -18,6 +18,7 @@ const emptyStats: RuntimeStats = {
 
 export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const canvasWrapRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<ShadertoyRuntime | null>(null);
   const [status, setStatus] = useState({ ok: true, message: "Waiting", stats: emptyStats });
 
@@ -47,13 +48,17 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
       runtime.start();
     });
 
-    const resize = () => runtime.resize();
+    let resizeFrame = 0;
+    const resize = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => runtime.resize());
+    };
     const observer = new ResizeObserver(resize);
-    observer.observe(canvas);
-    if (canvas.parentElement) observer.observe(canvas.parentElement);
+    if (canvasWrapRef.current) observer.observe(canvasWrapRef.current);
     window.addEventListener("resize", resize);
     return () => {
       window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       window.removeEventListener("resize", resize);
       runtime.stop();
@@ -77,7 +82,7 @@ export function PreviewPane({ project, saveStatus }: PreviewPaneProps) {
           <span>{status.message}</span>
         </div>
       </div>
-      <div className="canvas-wrap">
+      <div className="canvas-wrap" ref={canvasWrapRef}>
         <canvas ref={canvasRef} />
       </div>
       <footer className="stats-row">

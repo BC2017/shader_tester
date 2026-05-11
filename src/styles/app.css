@@ -9,10 +9,18 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
 body {
   margin: 0;
-  min-width: 1040px;
-  min-height: 720px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: #101214;
 }
 
@@ -30,7 +38,9 @@ button {
 .app-shell {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr);
-  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -38,7 +48,9 @@ button {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
   padding: 18px;
+  overflow: hidden;
   border-right: 1px solid #2a302e;
   background: #151817;
 }
@@ -256,6 +268,7 @@ input:focus {
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   background: #111413;
 }
 
@@ -318,8 +331,9 @@ input:focus {
 
 .ide-grid {
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(430px, 0.95fr);
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 0.95fr);
   gap: 1px;
+  min-width: 0;
   min-height: 0;
   background: #2a302e;
 }
@@ -335,6 +349,7 @@ input:focus {
 
 .preview-pane {
   grid-template-rows: 64px minmax(0, 1fr) 38px;
+  overflow: hidden;
 }
 
 .pane-header {
@@ -390,7 +405,9 @@ input:focus {
 }
 
 .canvas-wrap {
+  position: relative;
   min-height: 0;
+  overflow: hidden;
   background: #050606;
 }
 
@@ -403,10 +420,20 @@ canvas {
 .stats-row {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 16px;
+  min-width: 0;
+  min-height: 38px;
   padding: 0 14px;
+  overflow: hidden;
   border-top: 1px solid #27302c;
   font-size: 12px;
+}
+
+.stats-row span {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .save-state {
@@ -485,13 +512,5 @@ canvas {
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 248px minmax(0, 1fr);
-  }
-
-  .ide-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .preview-pane {
-    min-height: 360px;
   }
 }
