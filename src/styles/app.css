@@ -224,6 +224,29 @@ select:focus {
   background: #111413;
 }
 
+.workspace-stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-panel {
+  grid-area: 1 / 1;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.workspace-panel.active {
+  z-index: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
 .topbar {
   display: flex;
   align-items: center;

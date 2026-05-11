@@ -510,39 +510,49 @@ function App() {
           </div>
         </header>
 
-        {activeView === "workspace" ? (
-          <div className="ide-grid">
-            <EditorPane
-              pass={activePass}
-              showMinimap={showEditorMinimap}
-              onChange={(code) => updatePassCode(activePass, code)}
-              controls={showChannelEditor ? (
-                <ChannelPanel
-                  pass={activePass}
-                  bufferPasses={bufferPasses}
-                  textureOptions={textureOptions}
-                  canRemovePass={activePass.type === "buffer" && activePass.id !== "buffer-a"}
-                  onChannelChange={(channel) => updatePassChannel(activePass, channel)}
-                  onRemovePass={handleRemoveActivePass}
-                />
-              ) : null}
-            />
-            <PreviewPane project={project} isPaused={isPreviewPaused} saveStatus={saveStatus} />
+        <div className="workspace-stage">
+          <div
+            className={activeView === "workspace" ? "workspace-panel active" : "workspace-panel"}
+            aria-hidden={activeView !== "workspace"}
+          >
+            <div className="ide-grid">
+              <EditorPane
+                pass={activePass}
+                showMinimap={showEditorMinimap}
+                isActive={activeView === "workspace"}
+                onChange={(code) => updatePassCode(activePass, code)}
+                controls={showChannelEditor ? (
+                  <ChannelPanel
+                    pass={activePass}
+                    bufferPasses={bufferPasses}
+                    textureOptions={textureOptions}
+                    canRemovePass={activePass.type === "buffer" && activePass.id !== "buffer-a"}
+                    onChannelChange={(channel) => updatePassChannel(activePass, channel)}
+                    onRemovePass={handleRemoveActivePass}
+                  />
+                ) : null}
+              />
+              <PreviewPane project={project} isPaused={isPreviewPaused || activeView !== "workspace"} saveStatus={saveStatus} />
+            </div>
           </div>
-        ) : (
-          <ProjectLibrary
-            currentProject={project}
-            projects={projectSummaries}
-            isDirty={isDirty}
-            status={libraryStatus || saveStatus}
-            onOpenProject={handleOpenProject}
-            onCreateProject={handleCreateProject}
-            onRenameProject={handleRenameProject}
-            onDuplicateProject={handleDuplicateProject}
-            onDeleteProject={handleDeleteProject}
-            onRefresh={() => void refreshProjectSummaries()}
-          />
-        )}
+          <div
+            className={activeView === "library" ? "workspace-panel active" : "workspace-panel"}
+            aria-hidden={activeView !== "library"}
+          >
+            <ProjectLibrary
+              currentProject={project}
+              projects={projectSummaries}
+              isDirty={isDirty}
+              status={libraryStatus || saveStatus}
+              onOpenProject={handleOpenProject}
+              onCreateProject={handleCreateProject}
+              onRenameProject={handleRenameProject}
+              onDuplicateProject={handleDuplicateProject}
+              onDeleteProject={handleDeleteProject}
+              onRefresh={() => void refreshProjectSummaries()}
+            />
+          </div>
+        </div>
       </section>
 
       {showSetup && (

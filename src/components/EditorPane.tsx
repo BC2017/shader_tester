@@ -5,11 +5,12 @@ import type { ShaderPass } from "../lib/shaderTypes";
 interface EditorPaneProps {
   pass: ShaderPass;
   showMinimap: boolean;
+  isActive: boolean;
   controls?: ReactNode;
   onChange: (code: string) => void;
 }
 
-export function EditorPane({ pass, showMinimap, controls, onChange }: EditorPaneProps) {
+export function EditorPane({ pass, showMinimap, isActive, controls, onChange }: EditorPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
 
@@ -49,6 +50,24 @@ export function EditorPane({ pass, showMinimap, controls, onChange }: EditorPane
   useEffect(() => {
     window.requestAnimationFrame(layoutEditor);
   }, [layoutEditor, pass.id]);
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    let thirdFrame = 0;
+    const firstFrame = window.requestAnimationFrame(layoutEditor);
+    const secondFrame = window.requestAnimationFrame(() => {
+      thirdFrame = window.requestAnimationFrame(layoutEditor);
+    });
+    const timeout = window.setTimeout(layoutEditor, 120);
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      window.cancelAnimationFrame(thirdFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [isActive, layoutEditor, pass.id]);
 
   return (
     <section className="editor-pane" aria-label="Shader editor">
