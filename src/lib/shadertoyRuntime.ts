@@ -1,0 +1,383 @@
+import type { RuntimeStats, ShaderPass, ShaderProject } from "./shaderTypes";
+
+type RuntimeStatus = {
+  ok: boolean;
+  message: string;
+  stats: RuntimeStats;
+};
+
+type CompiledProgram = {
+  pass: ShaderPass;
+  program: WebGLProgram;
+  uniforms: Record<string, WebGLUniformLocation | null>;
+};
+
+type BufferTarget = {
+  read: WebGLTexture;
+  write: WebGLTexture;
+  framebuffer: WebGLFramebuffer;
+  width: number;
+  height: number;
+};
+
+const VERTEX_SHADER = `#version 300 es
+precision highp float;
+const vec2 positions[3] = vec2[3](
+  vec2(-1.0, -1.0),
+  vec2(3.0, -1.0),
+  vec2(-1.0, 3.0)
+);
+void main() {
+  gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+}`;
+
+export class ShadertoyRuntime {
+  private gl: WebGL2RenderingContext;
+  private project?: ShaderProject;
+  private programs = new Map<string, CompiledProgram>();
+  private buffers = new Map<string, BufferTarget>();
+  private animation = 0;
+  private startTime = performance.now();
+  private lastFrameTime = this.startTime;
+  private frame = 0;
+  private mouse = [0, 0, 0, 0];
+  private statusHandler?: (status: RuntimeStatus) => void;
+
+  constructor(private canvas: HTMLCanvasElement) {
+    const gl = canvas.getContext("webgl2", {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      preserveDrawingBuffer: true
+    });
+
+    if (!gl) {
+      throw new Error("WebGL2 is required for ShaderTester.");
+    }
+
+    this.gl = gl;
+    this.bindPointerEvents();
+  }
+
+  onStatus(handler: (status: RuntimeStatus) => void) {
+    this.statusHandler = handler;
+  }
+
+  load(project: ShaderProject) {
+    this.project = project;
+    this.frame = 0;
+    this.startTime = performance.now();
+    this.compileProject();
+    this.resize();
+  }
+
+  updatePass(passId: string, code: string) {
+    if (!this.project) return;
+    this.project = {
+      ...this.project,
+      passes: this.project.passes.map((pass) => (pass.id === passId ? { ...pass, code } : pass))
+    };
+    this.compileProject();
+  }
+
+  start() {
+    const tick = () => {
+      this.render();
+      this.animation = requestAnimationFrame(tick);
+    };
+    cancelAnimationFrame(this.animation);
+    this.animation = requestAnimationFrame(tick);
+  }
+
+  stop() {
+    cancelAnimationFrame(this.animation);
+  }
+
+  resize() {
+    const width = Math.max(1, Math.floor(this.canvas.clientWidth * window.devicePixelRatio));
+    const height = Math.max(1, Math.floor(this.canvas.clientHeight * window.devicePixelRatio));
+    if (this.canvas.width !== width || this.canvas.height !== height) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+      this.rebuildBuffers(width, height);
+    }
+  }
+
+  private bindPointerEvents() {
+    this.canvas.addEventListener("pointerdown", (event) => {
+      const point = this.pointer(event);
+      this.mouse = [point[0], point[1], point[0], point[1]];
+      this.canvas.setPointerCapture(event.pointerId);
+    });
+    this.canvas.addEventListener("pointermove", (event) => {
+      if (event.buttons === 0) return;
+      const point = this.pointer(event);
+      this.mouse = [point[0], point[1], this.mouse[2], this.mouse[3]];
+    });
+    this.canvas.addEventListener("pointerup", (event) => {
+      const point = this.pointer(event);
+      this.mouse = [point[0], point[1], -Math.abs(this.mouse[2]), -Math.abs(this.mouse[3])];
+      this.canvas.releasePointerCapture(event.pointerId);
+    });
+  }
+
+  private pointer(event: PointerEvent): [number, number] {
+    const rect = this.canvas.getBoundingClientRect();
+    return [
+      (event.clientX - rect.left) * window.devicePixelRatio,
+      (rect.bottom - event.clientY) * window.devicePixelRatio
+    ];
+  }
+
+  private compileProject() {
+    if (!this.project) return;
+    const nextPrograms = new Map<string, CompiledProgram>();
+    const common = this.project.passes.find((pass) => pass.type === "common")?.code ?? "";
+
+    try {
+      for (const pass of this.project.passes) {
+        if (pass.type === "common" || pass.type === "sound") continue;
+        const program = this.createProgram(common, pass.code);
+        nextPrograms.set(pass.id, {
+          pass,
+          program,
+          uniforms: this.collectUniforms(program)
+        });
+      }
+      this.programs.forEach(({ program }) => this.gl.deleteProgram(program));
+      this.programs = nextPrograms;
+      this.emitStatus(true, "Compiled");
+    } catch (error) {
+      nextPrograms.forEach(({ program }) => this.gl.deleteProgram(program));
+      this.emitStatus(false, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private createProgram(commonCode: string, passCode: string): WebGLProgram {
+    const gl = this.gl;
+    const vertex = this.compileShader(gl.VERTEX_SHADER, VERTEX_SHADER);
+    const fragment = this.compileShader(gl.FRAGMENT_SHADER, this.fragmentSource(commonCode, passCode));
+    const program = gl.createProgram();
+    if (!program) throw new Error("Failed to create shader program.");
+    gl.attachShader(program, vertex);
+    gl.attachShader(program, fragment);
+    gl.linkProgram(program);
+    gl.deleteShader(vertex);
+    gl.deleteShader(fragment);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const info = gl.getProgramInfoLog(program) || "Unknown program link error.";
+      gl.deleteProgram(program);
+      throw new Error(info);
+    }
+
+    return program;
+  }
+
+  private compileShader(type: number, source: string): WebGLShader {
+    const gl = this.gl;
+    const shader = gl.createShader(type);
+    if (!shader) throw new Error("Failed to create shader.");
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(shader) || "Unknown shader compile error.";
+      gl.deleteShader(shader);
+      throw new Error(info);
+    }
+    return shader;
+  }
+
+  private fragmentSource(commonCode: string, passCode: string) {
+    return `#version 300 es
+precision highp float;
+precision highp sampler2D;
+
+uniform vec3 iResolution;
+uniform float iTime;
+uniform float iTimeDelta;
+uniform int iFrame;
+uniform vec4 iMouse;
+uniform vec4 iDate;
+uniform float iSampleRate;
+uniform vec3 iChannelResolution[4];
+uniform float iChannelTime[4];
+uniform sampler2D iChannel0;
+uniform sampler2D iChannel1;
+uniform sampler2D iChannel2;
+uniform sampler2D iChannel3;
+
+out vec4 outColor;
+
+${commonCode}
+
+${passCode}
+
+void main() {
+  vec4 color = vec4(0.0);
+  mainImage(color, gl_FragCoord.xy);
+  outColor = color;
+}`;
+  }
+
+  private collectUniforms(program: WebGLProgram) {
+    const names = [
+      "iResolution",
+      "iTime",
+      "iTimeDelta",
+      "iFrame",
+      "iMouse",
+      "iDate",
+      "iSampleRate",
+      "iChannelResolution",
+      "iChannelTime",
+      "iChannel0",
+      "iChannel1",
+      "iChannel2",
+      "iChannel3"
+    ];
+
+    return Object.fromEntries(names.map((name) => [name, this.gl.getUniformLocation(program, name)]));
+  }
+
+  private rebuildBuffers(width: number, height: number) {
+    if (!this.project) return;
+    this.buffers.forEach((target) => {
+      this.gl.deleteTexture(target.read);
+      this.gl.deleteTexture(target.write);
+      this.gl.deleteFramebuffer(target.framebuffer);
+    });
+    this.buffers.clear();
+
+    for (const pass of this.project.passes.filter((item) => item.type === "buffer")) {
+      this.buffers.set(pass.id, this.createBufferTarget(width, height));
+    }
+  }
+
+  private createBufferTarget(width: number, height: number): BufferTarget {
+    const gl = this.gl;
+    return {
+      read: this.createTexture(width, height),
+      write: this.createTexture(width, height),
+      framebuffer: gl.createFramebuffer() as WebGLFramebuffer,
+      width,
+      height
+    };
+  }
+
+  private createTexture(width: number, height: number) {
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) throw new Error("Failed to create texture.");
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return texture;
+  }
+
+  private render() {
+    if (!this.project) return;
+    this.resize();
+
+    const now = performance.now();
+    const time = (now - this.startTime) / 1000;
+    const delta = Math.max(0.001, (now - this.lastFrameTime) / 1000);
+    this.lastFrameTime = now;
+
+    const ordered = this.project.passes.filter((pass) => pass.type === "buffer" || pass.type === "image");
+    for (const pass of ordered) {
+      const compiled = this.programs.get(pass.id);
+      if (!compiled) continue;
+      if (pass.type === "buffer") {
+        const target = this.buffers.get(pass.id);
+        if (!target) continue;
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, target.framebuffer);
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, target.write, 0);
+        this.draw(compiled, time, delta, target.width, target.height);
+        [target.read, target.write] = [target.write, target.read];
+      } else {
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        this.draw(compiled, time, delta, this.canvas.width, this.canvas.height);
+      }
+    }
+
+    this.frame += 1;
+    this.emitStatus(true, "Rendering");
+  }
+
+  private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
+    const gl = this.gl;
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(compiled.program);
+    const uniforms = compiled.uniforms;
+
+    gl.uniform3f(uniforms.iResolution, width, height, 1);
+    gl.uniform1f(uniforms.iTime, time);
+    gl.uniform1f(uniforms.iTimeDelta, delta);
+    gl.uniform1i(uniforms.iFrame, this.frame);
+    gl.uniform4f(uniforms.iMouse, this.mouse[0], this.mouse[1], this.mouse[2], this.mouse[3]);
+    gl.uniform4fv(uniforms.iDate, this.dateUniform());
+    gl.uniform1f(uniforms.iSampleRate, 44100);
+    gl.uniform3fv(uniforms.iChannelResolution, this.channelResolutions(compiled.pass));
+    gl.uniform1fv(uniforms.iChannelTime, new Float32Array([time, time, time, time]));
+
+    for (let index = 0; index < 4; index += 1) {
+      gl.activeTexture(gl.TEXTURE0 + index);
+      gl.bindTexture(gl.TEXTURE_2D, this.textureForChannel(compiled.pass, index));
+      gl.uniform1i(uniforms[`iChannel${index}`], index);
+    }
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  private textureForChannel(pass: ShaderPass, index: number): WebGLTexture | null {
+    const channel = pass.channels.find((item) => item.index === index);
+    if (!channel || channel.source.kind === "none") return null;
+    if (channel.source.kind === "buffer") {
+      return this.buffers.get(channel.source.passId)?.read ?? null;
+    }
+    return null;
+  }
+
+  private channelResolutions(pass: ShaderPass) {
+    const values = new Float32Array(12);
+    for (let index = 0; index < 4; index += 1) {
+      const channel = pass.channels.find((item) => item.index === index);
+      if (channel?.source.kind === "buffer") {
+        const buffer = this.buffers.get(channel.source.passId);
+        values[index * 3] = buffer?.width ?? 0;
+        values[index * 3 + 1] = buffer?.height ?? 0;
+        values[index * 3 + 2] = 1;
+      }
+    }
+    return values;
+  }
+
+  private dateUniform() {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), 0, 0);
+    const day = Math.floor((Number(now) - Number(start)) / 86400000);
+    const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+    return new Float32Array([now.getFullYear(), now.getMonth() + 1, day, seconds]);
+  }
+
+  private emitStatus(ok: boolean, message: string) {
+    if (!this.statusHandler) return;
+    const now = performance.now();
+    const elapsed = (now - this.startTime) / 1000;
+    this.statusHandler({
+      ok,
+      message,
+      stats: {
+        frame: this.frame,
+        time: elapsed,
+        fps: this.frame > 0 ? this.frame / Math.max(elapsed, 0.001) : 0,
+        resolution: [this.canvas.width, this.canvas.height]
+      }
+    });
+  }
+}
