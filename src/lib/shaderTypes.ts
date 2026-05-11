@@ -4,7 +4,7 @@ export type ChannelSource =
   | { kind: "none" }
   | { kind: "buffer"; passId: string }
   | { kind: "keyboard" }
-  | { kind: "texture"; assetId: string };
+  | { kind: "texture"; assetId: string; mediaType?: "image" | "video" | "audio" };
 
 export interface ShaderChannel {
   index: number;
