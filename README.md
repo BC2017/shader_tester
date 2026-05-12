@@ -36,6 +36,9 @@ ShaderTester is a cross-platform desktop shader IDE for building and editing Sha
 - Cached imported image textures can be loaded into `iChannel0..3`
 - Cached imported video textures can be loaded into `iChannel0..3`
 - Cached imported audio textures can be loaded into `iChannel0..3` as Shadertoy-style 512x2 spectrum/waveform textures
+- Keyboard input textures can be loaded into `iChannel0..3`
+- Webcam input textures can be loaded into `iChannel0..3`
+- Microphone input textures can be loaded into `iChannel0..3` as Shadertoy-style 512x2 live audio textures
 - Buffer B/C/D passes can be created from the workspace toolbar
 - Active pass `iChannel0..3` inputs can be edited with buffer/media source, filter, wrap, and vflip controls
 
@@ -74,7 +77,6 @@ cargo check
 
 ## Next Milestones
 
-1. Add keyboard texture, webcam, microphone, and live audio input textures.
-2. Implement sound shader generation/playback.
-3. Add local gallery, thumbnails, tags, favorites, and search.
-4. Add portable import/export bundles.
+1. Implement sound shader generation/playback.
+2. Add local gallery, thumbnails, tags, favorites, and search.
+3. Add portable import/export bundles.

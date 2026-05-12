@@ -26,13 +26,15 @@ type RuntimeOptions = {
 
 type AudioTextureState = {
   analyser?: AnalyserNode;
-  source?: AudioBufferSourceNode;
+  source?: AudioNode;
   decodedSamples?: Float32Array;
   sampleRate: number;
   frequencyData: Uint8Array<ArrayBuffer>;
   waveformData: Uint8Array<ArrayBuffer>;
   pixels: Uint8Array<ArrayBuffer>;
 };
+
+type LiveInputKind = "webcam" | "microphone";
 
 function replaceFunction(source: string, returnType: string, name: string, replacement: string) {
   const pattern = new RegExp(`\\b${returnType}\\s+${name}\\s*\\(`);
@@ -68,6 +70,8 @@ export class ShadertoyRuntime {
   private vertexBuffer: WebGLBuffer;
   private fallbackTexture: WebGLTexture;
   private keyboardTexture: WebGLTexture;
+  private webcamTexture: WebGLTexture;
+  private microphoneTexture: WebGLTexture;
   private keyboardPixels = new Uint8Array(256 * 3 * 4);
   private pressedKeys = new Set<number>();
   private toggledKeys = new Set<number>();
@@ -84,6 +88,16 @@ export class ShadertoyRuntime {
   private assetAudios = new Map<string, AudioTextureState>();
   private assetDimensions = new Map<string, [number, number]>();
   private loadingAssets = new Set<string>();
+  private webcamVideo?: HTMLVideoElement;
+  private webcamStream?: MediaStream;
+  private webcamRequest?: Promise<void>;
+  private webcamAttempted = false;
+  private webcamWarning = "";
+  private microphoneState: AudioTextureState;
+  private microphoneStream?: MediaStream;
+  private microphoneRequest?: Promise<void>;
+  private microphoneAttempted = false;
+  private microphoneWarning = "";
   private audioContext?: AudioContext;
   private bufferWarning = "";
   private assetWarning = "";
@@ -145,6 +159,9 @@ export class ShadertoyRuntime {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     this.fallbackTexture = this.createSolidTexture([0, 0, 0, 255]);
     this.keyboardTexture = this.createKeyboardTexture();
+    this.webcamTexture = this.createSolidTexture([0, 0, 0, 255]);
+    this.microphoneTexture = this.createAudioTexture();
+    this.microphoneState = this.createAudioTextureState();
     this.bindPointerEvents();
     this.bindKeyboardEvents();
   }
@@ -160,6 +177,7 @@ export class ShadertoyRuntime {
     this.compileProject();
     this.resize(true);
     this.loadProjectAssets();
+    this.syncLiveInputs();
   }
 
   updatePass(passId: string, code: string) {
@@ -187,6 +205,22 @@ export class ShadertoyRuntime {
     cancelAnimationFrame(this.animation);
     this.animation = 0;
     this.isRunning = false;
+  }
+
+  dispose() {
+    this.stop();
+    this.stopWebcam();
+    this.stopMicrophone();
+    this.assetVideos.forEach((video) => {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    });
+    this.assetAudios.forEach((state) => {
+      state.source?.disconnect();
+      state.analyser?.disconnect();
+    });
+    void this.audioContext?.close().catch(() => undefined);
   }
 
   pause() {
@@ -507,6 +541,140 @@ void main() {
     }
   }
 
+  private syncLiveInputs() {
+    if (this.projectUsesLiveInput("webcam")) {
+      void this.ensureWebcamTexture();
+    } else {
+      this.stopWebcam();
+    }
+
+    if (this.projectUsesLiveInput("microphone")) {
+      void this.ensureMicrophoneTexture();
+    } else {
+      this.stopMicrophone();
+    }
+  }
+
+  private projectUsesLiveInput(kind: LiveInputKind) {
+    return Boolean(this.project?.passes.some((pass) => (
+      pass.channels.some((channel) => channel.source.kind === kind)
+    )));
+  }
+
+  private async ensureWebcamTexture() {
+    if (this.webcamStream || this.webcamRequest || this.webcamAttempted) return;
+    this.webcamAttempted = true;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.webcamWarning = "Webcam input is unavailable in this environment";
+      return;
+    }
+
+    this.webcamWarning = "Waiting for webcam permission";
+    this.webcamRequest = navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      .then(async (stream) => {
+        if (!this.projectUsesLiveInput("webcam")) {
+          stream.getTracks().forEach((track) => track.stop());
+          this.webcamWarning = "";
+          return;
+        }
+        const video = document.createElement("video");
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.srcObject = stream;
+
+        this.webcamStream = stream;
+        this.webcamVideo = video;
+        await video.play();
+        this.webcamWarning = "";
+      })
+      .catch((error) => {
+        this.stopWebcam(false, false);
+        this.webcamWarning = this.projectUsesLiveInput("webcam")
+          ? `Webcam input unavailable: ${this.mediaErrorMessage(error)}`
+          : "";
+      })
+      .finally(() => {
+        this.webcamRequest = undefined;
+      });
+
+    await this.webcamRequest;
+  }
+
+  private async ensureMicrophoneTexture() {
+    if (this.microphoneStream || this.microphoneRequest || this.microphoneAttempted) return;
+    this.microphoneAttempted = true;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      this.microphoneWarning = "Microphone input is unavailable in this environment";
+      return;
+    }
+
+    this.microphoneWarning = "Waiting for microphone permission";
+    this.microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(async (stream) => {
+        if (!this.projectUsesLiveInput("microphone")) {
+          stream.getTracks().forEach((track) => track.stop());
+          this.microphoneWarning = "";
+          return;
+        }
+        const context = this.audioContext ?? new AudioContext();
+        this.audioContext = context;
+        if (context.state === "suspended") {
+          await context.resume();
+        }
+
+        const source = context.createMediaStreamSource(stream);
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.65;
+        source.connect(analyser);
+
+        this.microphoneStream = stream;
+        this.microphoneState.source = source;
+        this.microphoneState.analyser = analyser;
+        this.microphoneState.decodedSamples = undefined;
+        this.microphoneWarning = "";
+      })
+      .catch((error) => {
+        this.stopMicrophone(false, false);
+        this.microphoneWarning = this.projectUsesLiveInput("microphone")
+          ? `Microphone input unavailable: ${this.mediaErrorMessage(error)}`
+          : "";
+      })
+      .finally(() => {
+        this.microphoneRequest = undefined;
+      });
+
+    await this.microphoneRequest;
+  }
+
+  private stopWebcam(clearWarning = true, resetAttempt = true) {
+    this.webcamVideo?.pause();
+    if (this.webcamVideo) this.webcamVideo.srcObject = null;
+    this.webcamStream?.getTracks().forEach((track) => track.stop());
+    this.webcamVideo = undefined;
+    this.webcamStream = undefined;
+    if (resetAttempt) this.webcamAttempted = false;
+    if (clearWarning) this.webcamWarning = "";
+  }
+
+  private stopMicrophone(clearWarning = true, resetAttempt = true) {
+    this.microphoneState.source?.disconnect();
+    this.microphoneState.analyser?.disconnect();
+    this.microphoneStream?.getTracks().forEach((track) => track.stop());
+    this.microphoneStream = undefined;
+    this.microphoneState = this.createAudioTextureState();
+    if (resetAttempt) this.microphoneAttempted = false;
+    if (clearWarning) this.microphoneWarning = "";
+  }
+
+  private mediaErrorMessage(error: unknown) {
+    if (error instanceof DOMException && error.name) return error.name;
+    return error instanceof Error ? error.message : String(error);
+  }
+
   private loadImageTexture(assetId: string, url: string) {
     return new Promise<void>((resolve, reject) => {
       const image = new Image();
@@ -565,13 +733,7 @@ void main() {
     const previous = this.assetTextures.get(assetId);
     if (previous) this.gl.deleteTexture(previous);
 
-    const state: AudioTextureState = {
-      sampleRate: 44100,
-      frequencyData: new Uint8Array(512),
-      waveformData: new Uint8Array(512),
-      pixels: new Uint8Array(512 * 2 * 4)
-    };
-    state.waveformData.fill(128);
+    const state = this.createAudioTextureState();
 
     this.assetTextures.set(assetId, texture);
     this.assetAudios.set(assetId, state);
@@ -744,6 +906,17 @@ void main() {
     return texture;
   }
 
+  private createAudioTextureState(): AudioTextureState {
+    const state: AudioTextureState = {
+      sampleRate: 44100,
+      frequencyData: new Uint8Array(512),
+      waveformData: new Uint8Array(512),
+      pixels: new Uint8Array(512 * 2 * 4)
+    };
+    state.waveformData.fill(128);
+    return state;
+  }
+
   private assertFramebufferComplete(target: BufferTarget, texture: WebGLTexture) {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
@@ -791,7 +964,7 @@ void main() {
     }
 
     this.frame += 1;
-    this.emitStatus(true, this.assetWarning || this.bufferWarning || "Rendering");
+    this.emitStatus(true, this.liveInputWarning() || this.assetWarning || this.bufferWarning || "Rendering");
   }
 
   private draw(compiled: CompiledProgram, time: number, delta: number, width: number, height: number) {
@@ -831,6 +1004,7 @@ void main() {
 
   private updateVideoTextures() {
     const gl = this.gl;
+    this.updateWebcamTexture();
     for (const [assetId, video] of this.assetVideos) {
       const texture = this.assetTextures.get(assetId);
       if (!texture || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) continue;
@@ -842,39 +1016,55 @@ void main() {
     }
   }
 
-  private updateAudioTextures(time: number) {
+  private updateWebcamTexture() {
+    const video = this.webcamVideo;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+
     const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.webcamTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+  }
+
+  private updateAudioTextures(time: number) {
     for (const [assetId, state] of this.assetAudios) {
       const texture = this.assetTextures.get(assetId);
       if (!texture) continue;
-      let hasAnalyserData = false;
-      if (state.analyser) {
-        state.analyser.getByteFrequencyData(state.frequencyData);
-        state.analyser.getByteTimeDomainData(state.waveformData);
-        hasAnalyserData = state.frequencyData.some((value) => value > 0) || state.waveformData.some((value) => value !== 128);
-      }
-      if (!hasAnalyserData && state.decodedSamples) {
-        this.writeDecodedAudioTexture(state, time);
-      }
-
-      for (let index = 0; index < 512; index += 1) {
-        const frequency = state.frequencyData[index];
-        const waveform = state.waveformData[index];
-        const frequencyOffset = index * 4;
-        const waveformOffset = (512 + index) * 4;
-        state.pixels[frequencyOffset] = frequency;
-        state.pixels[frequencyOffset + 1] = frequency;
-        state.pixels[frequencyOffset + 2] = frequency;
-        state.pixels[frequencyOffset + 3] = 255;
-        state.pixels[waveformOffset] = waveform;
-        state.pixels[waveformOffset + 1] = waveform;
-        state.pixels[waveformOffset + 2] = waveform;
-        state.pixels[waveformOffset + 3] = 255;
-      }
-
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, 2, gl.RGBA, gl.UNSIGNED_BYTE, state.pixels);
+      this.updateAudioTextureState(texture, state, time);
     }
+    this.updateAudioTextureState(this.microphoneTexture, this.microphoneState, time);
+  }
+
+  private updateAudioTextureState(texture: WebGLTexture, state: AudioTextureState, time: number) {
+    let hasAnalyserData = false;
+    if (state.analyser) {
+      state.analyser.getByteFrequencyData(state.frequencyData);
+      state.analyser.getByteTimeDomainData(state.waveformData);
+      hasAnalyserData = state.frequencyData.some((value) => value > 0) || state.waveformData.some((value) => value !== 128);
+    }
+    if (!hasAnalyserData && state.decodedSamples) {
+      this.writeDecodedAudioTexture(state, time);
+    }
+
+    for (let index = 0; index < 512; index += 1) {
+      const frequency = state.frequencyData[index];
+      const waveform = state.waveformData[index];
+      const frequencyOffset = index * 4;
+      const waveformOffset = (512 + index) * 4;
+      state.pixels[frequencyOffset] = frequency;
+      state.pixels[frequencyOffset + 1] = frequency;
+      state.pixels[frequencyOffset + 2] = frequency;
+      state.pixels[frequencyOffset + 3] = 255;
+      state.pixels[waveformOffset] = waveform;
+      state.pixels[waveformOffset + 1] = waveform;
+      state.pixels[waveformOffset + 2] = waveform;
+      state.pixels[waveformOffset + 3] = 255;
+    }
+
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, 2, gl.RGBA, gl.UNSIGNED_BYTE, state.pixels);
   }
 
   private writeDecodedAudioTexture(state: AudioTextureState, time: number) {
@@ -928,6 +1118,12 @@ void main() {
     if (channel.source.kind === "keyboard") {
       return this.keyboardTexture;
     }
+    if (channel.source.kind === "webcam") {
+      return this.webcamTexture;
+    }
+    if (channel.source.kind === "microphone") {
+      return this.microphoneTexture;
+    }
     return this.fallbackTexture;
   }
 
@@ -950,6 +1146,12 @@ void main() {
       } else if (channel?.source.kind === "keyboard") {
         values[index * 3] = 256;
         values[index * 3 + 1] = 3;
+      } else if (channel?.source.kind === "webcam") {
+        values[index * 3] = this.webcamVideo?.videoWidth || 1;
+        values[index * 3 + 1] = this.webcamVideo?.videoHeight || 1;
+      } else if (channel?.source.kind === "microphone") {
+        values[index * 3] = 512;
+        values[index * 3 + 1] = 2;
       }
     }
     return values;
@@ -975,6 +1177,10 @@ void main() {
     this.keyboardPixels[offset + 1] = value;
     this.keyboardPixels[offset + 2] = value;
     this.keyboardPixels[offset + 3] = 255;
+  }
+
+  private liveInputWarning() {
+    return this.webcamWarning || this.microphoneWarning;
   }
 
   private dateUniform() {

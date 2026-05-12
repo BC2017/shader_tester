@@ -69,7 +69,11 @@ export function ChannelPanel({
                 })}
               >
                 <option value="none">None</option>
-                <option value="keyboard">Keyboard</option>
+                <optgroup label="Live Inputs">
+                  <option value="keyboard">Keyboard</option>
+                  <option value="webcam">Webcam</option>
+                  <option value="microphone">Microphone</option>
+                </optgroup>
                 <optgroup label="Buffers">
                   {bufferPasses.map((buffer) => (
                     <option key={buffer.id} value={`buffer:${buffer.id}`}>
@@ -122,12 +126,16 @@ export function ChannelPanel({
 function sourceValue(source: ChannelSource) {
   if (source.kind === "buffer") return `buffer:${source.passId}`;
   if (source.kind === "keyboard") return "keyboard";
+  if (source.kind === "webcam") return "webcam";
+  if (source.kind === "microphone") return "microphone";
   if (source.kind === "texture") return `texture:${source.assetId}`;
   return "none";
 }
 
 function sourceFromValue(value: string, textureOptions: TextureOption[]): ChannelSource {
   if (value === "keyboard") return { kind: "keyboard" };
+  if (value === "webcam") return { kind: "webcam" };
+  if (value === "microphone") return { kind: "microphone" };
   if (value.startsWith("buffer:")) return { kind: "buffer", passId: value.slice("buffer:".length) };
   if (value.startsWith("texture:")) {
     const assetId = value.slice("texture:".length);

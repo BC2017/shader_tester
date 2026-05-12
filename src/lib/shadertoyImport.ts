@@ -1,4 +1,4 @@
-import type { ShaderChannel, ShaderPass, ShaderProject } from "./shaderTypes";
+import type { ChannelSource, ShaderChannel, ShaderPass, ShaderProject } from "./shaderTypes";
 
 interface ShadertoyInput {
   channel?: number;
@@ -81,21 +81,22 @@ function convertPass(pass: ShadertoyRenderPass, outputPasses: Map<string, string
 }
 
 function convertInput(input: ShadertoyInput, outputPasses: Map<string, string>): ShaderChannel {
-  const source = input.ctype === "keyboard"
-    ? { kind: "keyboard" as const }
-    : isBufferInput(input)
-      ? { kind: "buffer" as const, passId: bufferPassId(input, outputPasses) }
-      : input.src
-        ? { kind: "texture" as const, assetId: input.src, mediaType: mediaTypeForInput(input) }
-        : { kind: "none" as const };
-
   return {
     index: input.channel ?? 0,
-    source,
+    source: sourceForInput(input, outputPasses),
     filter: input.sampler?.filter === "nearest" ? "nearest" : "linear",
     wrap: input.sampler?.wrap === "repeat" ? "repeat" : "clamp",
     vflip: input.sampler?.vflip === "true"
   };
+}
+
+function sourceForInput(input: ShadertoyInput, outputPasses: Map<string, string>): ChannelSource {
+  if (input.ctype === "keyboard") return { kind: "keyboard" };
+  if (input.ctype === "webcam") return { kind: "webcam" };
+  if (input.ctype === "mic" || input.ctype === "microphone") return { kind: "microphone" };
+  if (isBufferInput(input)) return { kind: "buffer", passId: bufferPassId(input, outputPasses) };
+  if (input.src) return { kind: "texture", assetId: input.src, mediaType: mediaTypeForInput(input) };
+  return { kind: "none" };
 }
 
 function outputPassMap(renderPasses: ShadertoyRenderPass[]) {
