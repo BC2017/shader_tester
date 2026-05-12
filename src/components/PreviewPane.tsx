@@ -114,7 +114,7 @@ export function PreviewPane({ project, isPaused, saveStatus }: PreviewPaneProps)
       window.cancelAnimationFrame(resizeFrame);
       observer.disconnect();
       window.removeEventListener("resize", resize);
-      runtime.stop();
+      runtime.dispose();
       runtimeRef.current = null;
     };
   }, []);
